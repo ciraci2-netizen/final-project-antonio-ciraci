@@ -307,7 +307,7 @@ def run_streamlit():
     st.markdown('<div class="section-header">Top Ranked Listings</div>', unsafe_allow_html=True)
     display_cols = [c for c in ["name", "neighbourhood_group", "room_type", "price", "number_of_reviews", "ranking_score"] if c in ranked_df.columns]
     st.dataframe(
-        ranked_df[display_cols].head(top_n).reset_index(drop=True),
+        ranked_df[display_cols].head(top_n).reset_index(drop=True).rename(index=lambda x: x+1),
         use_container_width=True,
         height=400
     )
@@ -353,7 +353,6 @@ def run_streamlit():
                 coloraxis_colorbar=dict(
                     title="Price (€)",
                     tickfont=dict(color="#8899AA", size=10),
-                    titlefont=dict(color="#8899AA", size=10),
                     bgcolor="#0A1628",
                     bordercolor="rgba(0,212,255,0.2)",
                 ),
