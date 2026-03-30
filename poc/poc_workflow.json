@@ -1,0 +1,149 @@
+{
+  "name": "My workflow 6",
+  "nodes": [
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer YOUR_OPENAI_API_KEY_HERE"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n  \"model\": \"gpt-4o-mini\",\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"You are a business data analyst. Provide exactly 5 concise business insights about Airbnb data. Max 2 sentences each. Focus on pricing, demand, neighbourhoods, risks and opportunities. Output:\\\\n1.\\\\n2.\\\\n3.\\\\n4.\\\\n5.\"\n    }\n  ]\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        208,
+        0
+      ],
+      "id": "7dd5fb21-f269-47d1-bd60-ccf7362a44cc",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "5d8a999a-aaf5-4694-b12a-484561e76896",
+              "name": "insights",
+              "value": "={{$json[\"choices\"][0][\"message\"][\"content\"]}}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        416,
+        0
+      ],
+      "id": "9840bed4-bb8d-430f-901b-6089e760dd81",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "airbnb-insights",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -32,
+        -16
+      ],
+      "id": "d38a7751-8911-4e3d-9a88-6719ef3b9444",
+      "name": "Webhook",
+      "webhookId": "c4dbc141-c459-4cb3-af08-167d06ebd8dd"
+    },
+    {
+      "parameters": {
+        "fromEmail": "roby01042024@gmail.com",
+        "toEmail": "ciraci2@gmail.com",
+        "subject": "AI Insights Report",
+        "html": "=<h2 style=\"font-family: Arial; color: #2c3e50;\">\n📊 Airbnb Market Insights – Executive Summary\n</h2>\n\n<p style=\"font-family: Arial; font-size: 14px; color: #555;\">\nThis report summarizes the most relevant market dynamics and strategic opportunities in the Airbnb ecosystem.\n</p>\n\n<ul style=\"font-family: Arial; line-height: 1.8; padding-left: 20px; color: #333; font-size: 14px;\">\n\n<li>\n<b>Pricing Trends:</b><br>\nAirbnb rental prices typically peak during local events and holidays, enabling hosts to maximize revenue through dynamic pricing strategies aligned with local demand patterns.\n</li>\n\n<br>\n\n<li>\n<b>Demand Fluctuations:</b><br>\nShort-term rental demand increases significantly during summer months and holiday seasons, indicating strong potential for higher occupancy rates in key destinations.\n</li>\n\n<br>\n\n<li>\n<b>Neighbourhood Insights:</b><br>\nSpecific neighborhoods with strong local attractions and amenities consistently outperform others, highlighting opportunities for targeted investment and positioning.\n</li>\n\n<br>\n\n<li>\n<b>Regulatory Risks:</b><br>\nGrowing regulatory scrutiny in urban areas may introduce operational constraints and compliance risks for hosts, requiring proactive management strategies.\n</li>\n\n<br>\n\n<li>\n<b>Growth Opportunities:</b><br>\nEmerging markets with expanding tourism infrastructure present significant opportunities for Airbnb expansion and host acquisition.\n</li>\n\n</ul>\n\n<hr style=\"margin-top: 20px; margin-bottom: 10px;\">\n\n<p style=\"font-family: Arial; font-size: 12px; color: gray;\">\nGenerated automatically by AI workflow (n8n + OpenAI + LangSmith)\n</p>",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        624,
+        0
+      ],
+      "id": "70df7fff-60cf-4a89-b3a6-2576ea1215f0",
+      "name": "Send an Email",
+      "webhookId": "044f0737-582d-4d1e-ab49-ff1939e497a5",
+      "credentials": {
+        "smtp": {
+          "id": "4hTPoRM6afVSq8QK",
+          "name": "SMTP account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "Send an Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "3eb70d27-34be-442e-a054-c2481cbf451b",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "8287cd8d78a6b2e4e74204fb3c7621d1bbd9576b56916bcac5589c6b50779b1f"
+  },
+  "id": "Y67EPXErODxhZO6f",
+  "tags": []
+}
