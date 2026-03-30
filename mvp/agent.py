@@ -411,6 +411,83 @@ def run_streamlit():
             insights = analyze_listings(ranked_df, selected_neighbourhood)
         st.markdown(f'<div class="insights-box">{insights}</div>', unsafe_allow_html=True)
 
+    # Analyse My Listing
+    st.markdown('<div class="section-header">Analyse My Listing</div>', unsafe_allow_html=True)
+    st.markdown("""
+    <div style="background: #132140; border: 1px solid rgba(0,212,255,0.15); border-left: 3px solid #FFD700; border-radius: 0 12px 12px 0; padding: 1rem 1.5rem; margin-bottom: 1.5rem;">
+        <p style="color: #FFD700; font-size: 0.8rem; font-family: Space Mono, monospace; letter-spacing: 0.1em; margin: 0 0 0.3rem;">HOW IT WORKS</p>
+        <p style="color: #C8D8E8; font-size: 0.9rem; margin: 0;">Enter your listing details below — BerlinHostAIQ will rank you against your competitors and generate personalised AI recommendations.</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    with st.form("listing_form"):
+        fc1, fc2, fc3 = st.columns(3)
+        with fc1:
+            host_price = st.number_input("Your nightly price (€)", min_value=10, max_value=1000, value=85)
+        with fc2:
+            host_neighbourhood = st.selectbox("Your neighbourhood", ["All"] + sorted(df["neighbourhood_group"].dropna().unique().tolist()), key="host_nb")
+        with fc3:
+            host_reviews = st.number_input("Number of reviews", min_value=0, max_value=5000, value=25)
+        host_amenities = st.text_input("Key amenities (e.g. balcony, garden, parking, wifi)", value="balcony, wifi, fully equipped kitchen")
+        submitted = st.form_submit_button("Analyse My Listing →", type="primary")
+
+    if submitted:
+        with st.spinner("Ranking your listing vs competitors..."):
+            comp_df = compute_ranking(df, host_neighbourhood if host_neighbourhood != "All" else None)
+            nb_median = comp_df["price"].median()
+            nb_listings = len(comp_df)
+            price_score = round(1 - min(host_price / (nb_median * 2), 1), 3)
+            max_reviews = comp_df["number_of_reviews"].max()
+            review_score = round(host_reviews / max_reviews if max_reviews > 0 else 0, 3)
+            demand_score = round(nb_listings / df["neighbourhood_group"].value_counts().max(), 3)
+            my_score = round(price_score * 0.4 + review_score * 0.4 + demand_score * 0.2, 3)
+            percentile = round((comp_df["ranking_score"] < my_score).mean() * 100, 1)
+
+            personal_prompt = f"""
+You are a competitive intelligence analyst for the Berlin Airbnb market.
+
+A host has provided their listing details:
+- Nightly price: €{host_price}
+- Neighbourhood: {host_neighbourhood}
+- Number of reviews: {host_reviews}
+- Key amenities: {host_amenities}
+- Their composite ranking score: {my_score} (beats {percentile}% of competitors in {host_neighbourhood})
+- Neighbourhood median price: €{nb_median:.0f}
+- Competing listings in area: {nb_listings}
+
+Generate 5 highly specific, actionable recommendations for this host:
+1. Price positioning: are they over or underpriced vs the €{nb_median:.0f} median?
+2. How their {host_reviews} reviews compare to top performers
+3. Which of their amenities ({host_amenities}) are strongest differentiators
+4. What they should change THIS WEEK to improve their ranking
+5. One optimised listing description opening sentence that highlights their best feature
+
+Be direct, specific, and use the numbers provided.
+"""
+            llm = ChatOpenAI(model="gpt-4o-mini")
+            from langchain_core.messages import HumanMessage
+            response = llm.invoke([HumanMessage(content=personal_prompt)])
+            personal_insights = response.content
+
+        col_score, col_insights = st.columns([1, 2])
+        with col_score:
+            score_color = "#00D4FF" if percentile >= 50 else "#FFD700" if percentile >= 25 else "#FF6B6B"
+            st.markdown(f"""
+            <div style="background: #132140; border: 1px solid rgba(0,212,255,0.2); border-radius: 12px; padding: 1.5rem; text-align: center;">
+                <p style="color: #8899AA; font-size: 0.7rem; font-family: Space Mono, monospace; letter-spacing: 0.1em; margin: 0 0 0.5rem;">YOUR SCORE</p>
+                <p style="color: {score_color}; font-size: 3rem; font-weight: 700; margin: 0; line-height: 1;">{my_score}</p>
+                <p style="color: #8899AA; font-size: 0.85rem; margin: 0.5rem 0 1.5rem;">beats {percentile}% of {host_neighbourhood} listings</p>
+                <div style="border-top: 1px solid rgba(0,212,255,0.1); padding-top: 1rem;">
+                    <p style="color: #8899AA; font-size: 0.7rem; font-family: Space Mono, monospace; margin: 0 0 0.3rem;">SCORE BREAKDOWN</p>
+                    <p style="color: #C8D8E8; font-size: 0.8rem; margin: 0.2rem 0;">Price &nbsp;&nbsp; {price_score:.3f} × 40%</p>
+                    <p style="color: #C8D8E8; font-size: 0.8rem; margin: 0.2rem 0;">Reviews &nbsp; {review_score:.3f} × 40%</p>
+                    <p style="color: #C8D8E8; font-size: 0.8rem; margin: 0.2rem 0;">Demand &nbsp; {demand_score:.3f} × 20%</p>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+        with col_insights:
+            st.markdown(f'<div class="insights-box">{personal_insights}</div>', unsafe_allow_html=True)
+
     # Footer
     st.markdown("""
     <div class="footer">
