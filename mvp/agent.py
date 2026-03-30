@@ -312,6 +312,72 @@ def run_streamlit():
         height=400
     )
 
+    # Map + Chart
+    col_map, col_chart = st.columns([3, 2])
+
+    with col_map:
+        st.markdown('<div class="section-header">Listings Map — Berlin</div>', unsafe_allow_html=True)
+        try:
+            import pydeck as pdk
+            map_df = ranked_df.dropna(subset=["latitude", "longitude"]).head(500).copy()
+            map_df["color_r"] = (255 * (1 - map_df["ranking_score"])).astype(int).clip(0, 255)
+            map_df["color_g"] = (map_df["ranking_score"] * 212).astype(int).clip(0, 255)
+            map_df["color_b"] = 255
+            layer = pdk.Layer(
+                "ScatterplotLayer",
+                data=map_df,
+                get_position=["longitude", "latitude"],
+                get_fill_color=["color_r", "color_g", "color_b", 180],
+                get_radius=80,
+                pickable=True,
+            )
+            view = pdk.ViewState(latitude=52.52, longitude=13.405, zoom=10, pitch=0)
+            st.pydeck_chart(pdk.Deck(
+                layers=[layer],
+                initial_view_state=view,
+                map_style="mapbox://styles/mapbox/dark-v10",
+                tooltip={"text": "{name}
+Price: €{price}
+Score: {ranking_score}"}
+            ))
+        except Exception as e:
+            st.caption(f"Map unavailable: {e}")
+
+    with col_chart:
+        st.markdown('<div class="section-header">Median Price by Neighbourhood</div>', unsafe_allow_html=True)
+        try:
+            import plotly.express as px
+            price_by_nb = (
+                df.groupby("neighbourhood_group")["price"]
+                .median()
+                .reset_index()
+                .sort_values("price", ascending=True)
+                .rename(columns={"neighbourhood_group": "Neighbourhood", "price": "Median Price (€)"})
+            )
+            fig = px.bar(
+                price_by_nb,
+                x="Median Price (€)",
+                y="Neighbourhood",
+                orientation="h",
+                color="Median Price (€)",
+                color_continuous_scale=[[0, "#132140"], [0.5, "#00A0CC"], [1, "#00D4FF"]],
+            )
+            fig.update_layout(
+                paper_bgcolor="#0A1628",
+                plot_bgcolor="#0A1628",
+                font_color="#C8D8E8",
+                font_family="DM Sans",
+                margin=dict(l=10, r=10, t=10, b=10),
+                coloraxis_showscale=False,
+                xaxis=dict(gridcolor="rgba(0,212,255,0.1)", color="#8899AA"),
+                yaxis=dict(gridcolor="rgba(0,212,255,0.1)", color="#C8D8E8"),
+                height=400,
+            )
+            fig.update_traces(marker_line_width=0)
+            st.plotly_chart(fig, use_container_width=True)
+        except Exception as e:
+            st.caption(f"Chart unavailable: {e}")
+
     # AI Insights
     st.markdown('<div class="section-header">AI Competitive Insights</div>', unsafe_allow_html=True)
     col1, col2 = st.columns([1, 3])
