@@ -336,9 +336,7 @@ def run_streamlit():
                 layers=[layer],
                 initial_view_state=view,
                 map_style="mapbox://styles/mapbox/dark-v10",
-                tooltip={"text": "{name}
-Price: €{price}
-Score: {ranking_score}"}
+                tooltip={"text": "{name} | €{price}/night | Score: {ranking_score}"}
             ))
         except Exception as e:
             st.caption(f"Map unavailable: {e}")
