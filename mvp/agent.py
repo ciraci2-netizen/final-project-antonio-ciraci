@@ -31,7 +31,7 @@ from langsmith import Client
 # DATA LOADING
 # -------------------------------------------------------
 
-def load_data(path="data/raw/listings.csv"):
+def load_data(path="mvp/data/raw/listings.csv"):
     """Load and clean the Airbnb listings dataset."""
     try:
         df = pd.read_csv(path)
