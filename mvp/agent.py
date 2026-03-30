@@ -316,28 +316,49 @@ def run_streamlit():
     col_map, col_chart = st.columns([3, 2])
 
     with col_map:
-        st.markdown('<div class="section-header">Listings Map — Berlin</div>', unsafe_allow_html=True)
+        st.markdown('<div class="section-header">Berlin Neighbourhoods — Price & Demand</div>', unsafe_allow_html=True)
         try:
-            import pydeck as pdk
-            map_df = ranked_df.dropna(subset=["latitude", "longitude"]).head(500).copy()
-            map_df["color_r"] = (255 * (1 - map_df["ranking_score"])).astype(int).clip(0, 255)
-            map_df["color_g"] = (map_df["ranking_score"] * 212).astype(int).clip(0, 255)
-            map_df["color_b"] = 255
-            layer = pdk.Layer(
-                "ScatterplotLayer",
-                data=map_df,
-                get_position=["longitude", "latitude"],
-                get_fill_color=["color_r", "color_g", "color_b", 180],
-                get_radius=80,
-                pickable=True,
+            import plotly.express as px
+            map_data = (
+                df.dropna(subset=["latitude", "longitude", "neighbourhood_group"])
+                .groupby("neighbourhood_group")
+                .agg(
+                    lat=("latitude", "median"),
+                    lon=("longitude", "median"),
+                    median_price=("price", "median"),
+                    listing_count=("price", "count"),
+                    avg_reviews=("number_of_reviews", "mean"),
+                )
+                .reset_index()
             )
-            view = pdk.ViewState(latitude=52.52, longitude=13.405, zoom=10, pitch=0)
-            st.pydeck_chart(pdk.Deck(
-                layers=[layer],
-                initial_view_state=view,
-                map_style="mapbox://styles/mapbox/dark-v10",
-                tooltip={"text": "{name} | €{price}/night | Score: {ranking_score}"}
-            ))
+            fig_map = px.scatter_mapbox(
+                map_data,
+                lat="lat",
+                lon="lon",
+                size="listing_count",
+                color="median_price",
+                hover_name="neighbourhood_group",
+                hover_data={"median_price": ":€.0f", "listing_count": True, "lat": False, "lon": False},
+                color_continuous_scale=[[0, "#0D2137"], [0.4, "#0099CC"], [1, "#00D4FF"]],
+                size_max=50,
+                zoom=10,
+                center={"lat": 52.52, "lon": 13.405},
+                mapbox_style="carto-darkmatter",
+                labels={"median_price": "Median Price (€)", "listing_count": "Listings"},
+            )
+            fig_map.update_layout(
+                paper_bgcolor="#0A1628",
+                margin=dict(l=0, r=0, t=0, b=0),
+                height=430,
+                coloraxis_colorbar=dict(
+                    title="Price (€)",
+                    tickfont=dict(color="#8899AA", size=10),
+                    titlefont=dict(color="#8899AA", size=10),
+                    bgcolor="#0A1628",
+                    bordercolor="rgba(0,212,255,0.2)",
+                ),
+            )
+            st.plotly_chart(fig_map, use_container_width=True)
         except Exception as e:
             st.caption(f"Map unavailable: {e}")
 
