@@ -211,6 +211,36 @@ def run_streamlit():
 
         p, li, span, label { color: #C8D8E8 !important; }
         h1, h2, h3 { color: var(--white) !important; }
+
+        /* Selectbox dropdown fix */
+        div[data-baseweb="select"] > div {
+            background-color: #132140 !important;
+            border-color: rgba(0,212,255,0.3) !important;
+            color: #E0EEFF !important;
+        }
+        div[data-baseweb="select"] span { color: #E0EEFF !important; }
+        div[data-baseweb="select"] svg { fill: #00D4FF !important; }
+        div[data-baseweb="popover"] div[role="listbox"] {
+            background-color: #0F1F38 !important;
+            border: 1px solid rgba(0,212,255,0.2) !important;
+        }
+        div[data-baseweb="popover"] li {
+            background-color: #0F1F38 !important;
+            color: #E0EEFF !important;
+        }
+        div[data-baseweb="popover"] li:hover {
+            background-color: rgba(0,212,255,0.15) !important;
+            color: #00D4FF !important;
+        }
+        div[data-baseweb="popover"] li[aria-selected="true"] {
+            background-color: rgba(0,212,255,0.2) !important;
+            color: #00D4FF !important;
+        }
+        div[data-baseweb="input"] input {
+            background-color: #132140 !important;
+            color: #E0EEFF !important;
+            border-color: rgba(0,212,255,0.3) !important;
+        }
     </style>
     """, unsafe_allow_html=True)
 
@@ -236,18 +266,76 @@ def run_streamlit():
         st.stop()
 
     # Sidebar
+    # Language
+    LANG = {
+        "EN": {
+            "filters": "Filters", "neighbourhood": "Neighbourhood", "room_type": "Room type",
+            "top_n": "Top listings to analyse", "dataset": "DATASET", "formula": "RANKING FORMULA",
+            "rankings": T["rankings"], "caption": T["caption"],
+            "map_title": "Berlin Neighbourhoods — Price & Demand", "chart_title": "Median Price by Neighbourhood",
+            "insights_title": "AI Competitive Insights", "generate": T["generate"],
+            "analyse_title": "Analyse My Listing", "how_it_works": T["how_it_works"],
+            "how_text": "Enter your listing details — BerlinHostAIQ will rank you against competitors and generate personalised AI recommendations.",
+            "price_label": T["price_label"], "nb_label": T["nb_label"],
+            "reviews_label": T["reviews_label"], "amenities_label": T["amenities_label"],
+            "submit": "Analyse My Listing →", "your_score": T["your_score"], T["beats"]: "beats",
+            "listings_label": "listings", "breakdown": T["breakdown"],
+            "total": "Total Listings", "median": "Median Price", "avg": "Avg Reviews", "top": "Top Score",
+            "spinner_market": T["spinner_market"],
+            "spinner_listing": T["spinner_listing"],
+            "toast_market": T["toast_market"], "toast_listing": T["toast_listing"],
+        },
+        "IT": {
+            "filters": "Filtri", "neighbourhood": "Quartiere", "room_type": "Tipo di stanza",
+            "top_n": "Top listing da analizzare", "dataset": "DATASET", "formula": "FORMULA RANKING",
+            "rankings": "Top Listing per Ranking", "caption": "Score = Competitivitá prezzo (40%) + Velocitá recensioni (40%) + Domanda quartiere (20%)",
+            "map_title": "Quartieri di Berlino — Prezzi & Domanda", "chart_title": "Prezzo Mediano per Quartiere",
+            "insights_title": "AI Competitive Insights", "generate": "Genera Insights →",
+            "analyse_title": "Analizza il mio Listing", "how_it_works": "COME FUNZIONA",
+            "how_text": "Inserisci i dati del tuo listing — BerlinHostAIQ ti posizionerá vs i competitor e genererá raccomandazioni personalizzate.",
+            "price_label": "Prezzo a notte (€)", "nb_label": "Il tuo quartiere",
+            "reviews_label": "Numero di recensioni", "amenities_label": "Amenities principali (es. balcone, giardino, parcheggio, wifi)",
+            "submit": "Analizza il mio Listing →", "your_score": "IL TUO SCORE", "beats": "supera",
+            "listings_label": "listing", "breakdown": "DETTAGLIO SCORE",
+            "total": "Listing Totali", "median": "Prezzo Mediano", "avg": "Recensioni Medie", "top": "Top Score",
+            "spinner_market": "Analisi dati di mercato con GPT-4o-mini...",
+            "spinner_listing": "Posizionamento del tuo listing vs competitor...",
+            "toast_market": "✓ Analisi completata!", "toast_listing": "✓ Il tuo listing é stato analizzato!",
+        },
+        "DE": {
+            "filters": "Filter", "neighbourhood": "Bezirk", "room_type": "Zimmertyp",
+            "top_n": "Top-Inserate analysieren", "dataset": "DATENSATZ", "formula": "RANKING-FORMEL",
+            "rankings": "Top-Inserate nach Ranking", "caption": "Score = Preiswettbewerb (40%) + Bewertungsgeschwindigkeit (40%) + Bezirksnachfrage (20%)",
+            "map_title": "Berliner Bezirke — Preise & Nachfrage", "chart_title": "Medianpreis nach Bezirk",
+            "insights_title": "KI-Wettbewerbsanalyse", "generate": "Insights generieren →",
+            "analyse_title": "Mein Inserat analysieren", "how_it_works": "SO FUNKTIONIERT ES",
+            "how_text": "Geben Sie Ihre Inserat-Details ein — BerlinHostAIQ vergleicht Sie mit Mitbewerbern und erstellt personalisierte Empfehlungen.",
+            "price_label": "Ihr Nachtpreis (€)", "nb_label": "Ihr Bezirk",
+            "reviews_label": "Anzahl Bewertungen", "amenities_label": "Hauptausstattung (z.B. Balkon, Garten, Parkplatz, WLAN)",
+            "submit": "Inserat analysieren →", "your_score": "IHR SCORE", "beats": "besser als",
+            "listings_label": "Inserate", "breakdown": "SCORE-AUFSCHLÜSSELUNG",
+            "total": "Inserate gesamt", "median": "Medianpreis", "avg": "Ø Bewertungen", "top": "Top Score",
+            "spinner_market": "Marktdaten werden mit GPT-4o-mini analysiert...",
+            "spinner_listing": "Ihr Inserat wird mit Mitbewerbern verglichen...",
+            "toast_market": "✓ Analyse abgeschlossen!", "toast_listing": "✓ Ihr Inserat wurde analysiert!",
+        },
+    }
+
     with st.sidebar:
-        st.markdown("""
-        <div style="padding: 1rem 0 0.5rem; border-bottom: 1px solid rgba(0,212,255,0.15); margin-bottom: 1rem;">
-            <p style="font-family: 'Space Mono', monospace; font-size: 0.7rem; color: #00D4FF; letter-spacing: 0.15em; text-transform: uppercase; margin:0;">Filters</p>
+        lang_choice = st.radio("🌐 Language", ["EN", "IT", "DE"], horizontal=True)
+        T = LANG[lang_choice]
+
+        st.markdown(f"""
+        <div style="padding: 1rem 0 0.5rem; border-bottom: 1px solid rgba(0,212,255,0.15); margin-bottom: 1rem; margin-top: 0.5rem;">
+            <p style="font-family: 'Space Mono', monospace; font-size: 0.7rem; color: #00D4FF; letter-spacing: 0.15em; text-transform: uppercase; margin:0;">{T["filters"]}</p>
         </div>
         """, unsafe_allow_html=True)
 
         neighbourhoods = ["All"] + sorted(df["neighbourhood_group"].dropna().unique().tolist())
-        selected_neighbourhood = st.selectbox("Neighbourhood", neighbourhoods)
+        selected_neighbourhood = st.selectbox(T["neighbourhood"], neighbourhoods)
         room_types = ["All"] + sorted(df["room_type"].dropna().unique().tolist())
-        selected_room_type = st.selectbox("Room type", room_types)
-        top_n = st.slider("Top listings to analyse", min_value=5, max_value=50, value=10)
+        selected_room_type = st.selectbox(T["room_type"], room_types)
+        top_n = st.slider(T["top_n"], min_value=5, max_value=50, value=10)
 
         st.markdown(f"""
         <div style="margin-top: 2rem; border-top: 1px solid rgba(0,212,255,0.15); padding-top: 1rem;">
@@ -279,19 +367,19 @@ def run_streamlit():
     st.markdown(f"""
     <div class="kpi-grid">
         <div class="kpi-card">
-            <div class="kpi-label">Total Listings</div>
+            <div class="kpi-label">{T["total"]}</div>
             <div class="kpi-value cyan">{len(filtered):,}</div>
         </div>
         <div class="kpi-card">
-            <div class="kpi-label">Median Price</div>
+            <div class="kpi-label">{T["median"]}</div>
             <div class="kpi-value">&#8364;{filtered['price'].median():.0f}<span style="font-size:1rem;color:#8899AA">/night</span></div>
         </div>
         <div class="kpi-card">
-            <div class="kpi-label">Avg Reviews</div>
+            <div class="kpi-label">{T["avg"]}</div>
             <div class="kpi-value">{filtered['number_of_reviews'].mean():.0f}</div>
         </div>
         <div class="kpi-card">
-            <div class="kpi-label">Top Score</div>
+            <div class="kpi-label">{T["top"]}</div>
             <div class="kpi-value gold">{filtered['ranking_score'].max():.3f}</div>
         </div>
     </div>
@@ -311,7 +399,7 @@ def run_streamlit():
     col_map, col_chart = st.columns([3, 2])
 
     with col_map:
-        st.markdown('<div class="section-header">Berlin Neighbourhoods — Price & Demand</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="section-header">{T["map_title"]}</div>', unsafe_allow_html=True)
         try:
             import plotly.express as px
             map_data = (
@@ -357,7 +445,7 @@ def run_streamlit():
             st.caption(f"Map unavailable: {e}")
 
     with col_chart:
-        st.markdown('<div class="section-header">Median Price by Neighbourhood</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="section-header">{T["chart_title"]}</div>', unsafe_allow_html=True)
         try:
             import plotly.express as px
             price_by_nb = (
@@ -392,7 +480,7 @@ def run_streamlit():
             st.caption(f"Chart unavailable: {e}")
 
     # AI Market Insights
-    st.markdown('<div class="section-header">AI Competitive Insights</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="section-header">{T["insights_title"]}</div>', unsafe_allow_html=True)
     col1, col2 = st.columns([1, 3])
     with col1:
         run_button = st.button("Generate Insights →", type="primary")
@@ -408,7 +496,7 @@ def run_streamlit():
         st.toast("✓ Analysis complete!", icon="🤖")
 
     # Analyse My Listing
-    st.markdown('<div class="section-header">Analyse My Listing</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="section-header">{T["analyse_title"]}</div>', unsafe_allow_html=True)
     st.markdown("""
     <div style="background: #132140; border: 1px solid rgba(0,212,255,0.15); border-left: 3px solid #FFD700; border-radius: 0 12px 12px 0; padding: 1rem 1.5rem; margin-bottom: 1.5rem;">
         <p style="color: #FFD700; font-size: 0.8rem; font-family: Space Mono, monospace; letter-spacing: 0.1em; margin: 0 0 0.3rem;">HOW IT WORKS</p>
@@ -425,7 +513,7 @@ def run_streamlit():
         with fc3:
             host_reviews = st.number_input("Number of reviews", min_value=0, max_value=5000, value=25)
         host_amenities = st.text_input("Key amenities (e.g. balcony, garden, parking, wifi)", value="balcony, wifi, fully equipped kitchen")
-        submitted = st.form_submit_button("Analyse My Listing →", type="primary")
+        submitted = st.form_submit_button(T["submit"], type="primary")
 
     if submitted:
         with st.spinner("Ranking your listing vs competitors..."):
