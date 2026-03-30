@@ -258,6 +258,8 @@ def run_streamlit():
         neighbourhoods = ["All"] + sorted(df["neighbourhood_group"].dropna().unique().tolist())
         selected_neighbourhood = st.selectbox("Neighbourhood", neighbourhoods)
         top_n = st.slider("Top listings to analyse", min_value=5, max_value=50, value=10)
+        room_types = ["All"] + sorted(df["room_type"].dropna().unique().tolist())
+        selected_room_type = st.selectbox("Room type", room_types)
 
         st.markdown(f"""
         <div style="margin-top: 2rem; border-top: 1px solid rgba(0,212,255,0.15); padding-top: 1rem;">
@@ -274,7 +276,10 @@ def run_streamlit():
         """, unsafe_allow_html=True)
 
     # Compute ranking
-    ranked_df = compute_ranking(df, selected_neighbourhood)
+    df_filtered = df.copy()
+    if selected_room_type != "All":
+        df_filtered = df_filtered[df_filtered["room_type"] == selected_room_type]
+    ranked_df = compute_ranking(df_filtered, selected_neighbourhood)
     if ranked_df.empty:
         st.warning("No listings found for the selected filter.")
         st.stop()
@@ -311,6 +316,8 @@ def run_streamlit():
         use_container_width=True,
         height=400
     )
+
+    st.caption("Score = Price competitiveness (40%) + Review velocity (40%) + Neighbourhood demand (20%)")
 
     # Map + Chart
     col_map, col_chart = st.columns([3, 2])
@@ -410,6 +417,7 @@ def run_streamlit():
                 st.caption(f"✓ Logged to LangSmith · dataset: {dataset_id}")
             insights = analyze_listings(ranked_df, selected_neighbourhood)
         st.markdown(f'<div class="insights-box">{insights}</div>', unsafe_allow_html=True)
+        st.toast("✓ Analysis complete!", icon="🤖")
 
     # Analyse My Listing
     st.markdown('<div class="section-header">Analyse My Listing</div>', unsafe_allow_html=True)
@@ -487,6 +495,7 @@ Be direct, specific, and use the numbers provided.
             """, unsafe_allow_html=True)
         with col_insights:
             st.markdown(f'<div class="insights-box">{personal_insights}</div>', unsafe_allow_html=True)
+            st.toast("✓ Your listing has been analysed!", icon="🏠")
 
     # Footer
     st.markdown("""
