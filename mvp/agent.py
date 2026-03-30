@@ -176,23 +176,12 @@ def run_streamlit():
             --border: rgba(0, 212, 255, 0.15);
         }
 
-        /* Remove Streamlit default white padding/margin */
         .stApp { background-color: var(--bg-primary); font-family: 'DM Sans', sans-serif; }
         .block-container { padding-top: 1rem !important; }
         header[data-testid="stHeader"] { background-color: var(--bg-primary) !important; }
 
-        [data-testid="stSidebar"] {
-            background-color: var(--bg-secondary) !important;
-            border-right: 1px solid var(--border);
-        }
+        [data-testid="stSidebar"] { background-color: var(--bg-secondary) !important; border-right: 1px solid var(--border); }
         [data-testid="stSidebar"] * { color: var(--white) !important; }
-
-        /* Dropdown options readability */
-        [data-baseweb="select"] * { color: var(--white) !important; background-color: var(--bg-card) !important; }
-        [data-baseweb="popover"] { background-color: var(--bg-card) !important; }
-        [data-baseweb="menu"] { background-color: var(--bg-card) !important; }
-        [data-baseweb="menu"] li { color: #E0EEFF !important; background-color: var(--bg-card) !important; }
-        [data-baseweb="menu"] li:hover { background-color: rgba(0,212,255,0.15) !important; color: var(--cyan) !important; }
 
         .hero-header { padding: 1.5rem 0 1.5rem 0; border-bottom: 1px solid var(--border); margin-bottom: 2rem; }
         .hero-title { font-family: 'Space Mono', monospace; font-size: 2.4rem; font-weight: 700; color: var(--white); letter-spacing: -0.02em; margin: 0; line-height: 1.1; }
@@ -208,7 +197,6 @@ def run_streamlit():
         .kpi-value.cyan { color: var(--cyan); }
         .kpi-value.gold { color: var(--gold); }
 
-        /* Section header — refined, not all-caps mono */
         .section-header { font-family: 'DM Sans', sans-serif; font-size: 1rem; font-weight: 600; color: var(--cyan); letter-spacing: 0.05em; margin: 2rem 0 1rem 0; display: flex; align-items: center; gap: 10px; }
         .section-header::after { content: ''; flex: 1; height: 1px; background: var(--border); }
 
@@ -217,7 +205,7 @@ def run_streamlit():
         .stButton > button { background: linear-gradient(135deg, var(--cyan), #0099CC) !important; color: #0A1628 !important; font-family: 'Space Mono', monospace !important; font-weight: 700 !important; font-size: 0.85rem !important; letter-spacing: 0.08em !important; border: none !important; border-radius: 8px !important; padding: 0.7rem 2rem !important; }
         .stButton > button:hover { transform: translateY(-1px) !important; box-shadow: 0 4px 20px rgba(0,212,255,0.3) !important; }
 
-        .insights-box { background: var(--bg-card); border: 1px solid var(--border); border-left: 3px solid var(--cyan); border-radius: 0 12px 12px 0; padding: 1.5rem 2rem; margin-top: 1rem; color: #C8D8E8; line-height: 1.8; font-size: 0.95rem; }
+        .insights-box { background: var(--bg-card); border: 1px solid var(--border); border-left: 3px solid var(--cyan); border-radius: 0 12px 12px 0; padding: 1.5rem 2rem; margin-top: 1rem; color: #C8D8E8; line-height: 1.8; font-size: 0.95rem; white-space: pre-wrap; }
 
         .footer { margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid var(--border); font-size: 0.75rem; color: var(--muted); font-family: 'Space Mono', monospace; letter-spacing: 0.05em; }
 
@@ -257,9 +245,9 @@ def run_streamlit():
 
         neighbourhoods = ["All"] + sorted(df["neighbourhood_group"].dropna().unique().tolist())
         selected_neighbourhood = st.selectbox("Neighbourhood", neighbourhoods)
-        top_n = st.slider("Top listings to analyse", min_value=5, max_value=50, value=10)
         room_types = ["All"] + sorted(df["room_type"].dropna().unique().tolist())
         selected_room_type = st.selectbox("Room type", room_types)
+        top_n = st.slider("Top listings to analyse", min_value=5, max_value=50, value=10)
 
         st.markdown(f"""
         <div style="margin-top: 2rem; border-top: 1px solid rgba(0,212,255,0.15); padding-top: 1rem;">
@@ -275,10 +263,11 @@ def run_streamlit():
         </div>
         """, unsafe_allow_html=True)
 
-    # Compute ranking
+    # Apply filters
     df_filtered = df.copy()
     if selected_room_type != "All":
         df_filtered = df_filtered[df_filtered["room_type"] == selected_room_type]
+
     ranked_df = compute_ranking(df_filtered, selected_neighbourhood)
     if ranked_df.empty:
         st.warning("No listings found for the selected filter.")
@@ -312,11 +301,10 @@ def run_streamlit():
     st.markdown('<div class="section-header">Top Ranked Listings</div>', unsafe_allow_html=True)
     display_cols = [c for c in ["name", "neighbourhood_group", "room_type", "price", "number_of_reviews", "ranking_score"] if c in ranked_df.columns]
     st.dataframe(
-        ranked_df[display_cols].head(top_n).reset_index(drop=True).rename(index=lambda x: x+1),
+        ranked_df[display_cols].head(top_n).reset_index(drop=True).rename(index=lambda x: x + 1),
         use_container_width=True,
         height=400
     )
-
     st.caption("Score = Price competitiveness (40%) + Review velocity (40%) + Neighbourhood demand (20%)")
 
     # Map + Chart
@@ -396,14 +384,14 @@ def run_streamlit():
                 coloraxis_showscale=False,
                 xaxis=dict(gridcolor="rgba(0,212,255,0.1)", color="#8899AA"),
                 yaxis=dict(gridcolor="rgba(0,212,255,0.1)", color="#C8D8E8"),
-                height=400,
+                height=430,
             )
             fig.update_traces(marker_line_width=0)
             st.plotly_chart(fig, use_container_width=True)
         except Exception as e:
             st.caption(f"Chart unavailable: {e}")
 
-    # AI Insights
+    # AI Market Insights
     st.markdown('<div class="section-header">AI Competitive Insights</div>', unsafe_allow_html=True)
     col1, col2 = st.columns([1, 3])
     with col1:
@@ -424,7 +412,7 @@ def run_streamlit():
     st.markdown("""
     <div style="background: #132140; border: 1px solid rgba(0,212,255,0.15); border-left: 3px solid #FFD700; border-radius: 0 12px 12px 0; padding: 1rem 1.5rem; margin-bottom: 1.5rem;">
         <p style="color: #FFD700; font-size: 0.8rem; font-family: Space Mono, monospace; letter-spacing: 0.1em; margin: 0 0 0.3rem;">HOW IT WORKS</p>
-        <p style="color: #C8D8E8; font-size: 0.9rem; margin: 0;">Enter your listing details below — BerlinHostAIQ will rank you against your competitors and generate personalised AI recommendations.</p>
+        <p style="color: #C8D8E8; font-size: 0.9rem; margin: 0;">Enter your listing details — BerlinHostAIQ will rank you against competitors and generate personalised AI recommendations.</p>
     </div>
     """, unsafe_allow_html=True)
 
@@ -473,7 +461,6 @@ Generate 5 highly specific, actionable recommendations for this host:
 Be direct, specific, and use the numbers provided.
 """
             llm = ChatOpenAI(model="gpt-4o-mini")
-            from langchain_core.messages import HumanMessage
             response = llm.invoke([HumanMessage(content=personal_prompt)])
             personal_insights = response.content
 
@@ -487,15 +474,15 @@ Be direct, specific, and use the numbers provided.
                 <p style="color: #8899AA; font-size: 0.85rem; margin: 0.5rem 0 1.5rem;">beats {percentile}% of {host_neighbourhood} listings</p>
                 <div style="border-top: 1px solid rgba(0,212,255,0.1); padding-top: 1rem;">
                     <p style="color: #8899AA; font-size: 0.7rem; font-family: Space Mono, monospace; margin: 0 0 0.3rem;">SCORE BREAKDOWN</p>
-                    <p style="color: #C8D8E8; font-size: 0.8rem; margin: 0.2rem 0;">Price &nbsp;&nbsp; {price_score:.3f} × 40%</p>
-                    <p style="color: #C8D8E8; font-size: 0.8rem; margin: 0.2rem 0;">Reviews &nbsp; {review_score:.3f} × 40%</p>
-                    <p style="color: #C8D8E8; font-size: 0.8rem; margin: 0.2rem 0;">Demand &nbsp; {demand_score:.3f} × 20%</p>
+                    <p style="color: #C8D8E8; font-size: 0.8rem; margin: 0.2rem 0;">Price &nbsp;&nbsp; {price_score:.3f} x 40%</p>
+                    <p style="color: #C8D8E8; font-size: 0.8rem; margin: 0.2rem 0;">Reviews &nbsp; {review_score:.3f} x 40%</p>
+                    <p style="color: #C8D8E8; font-size: 0.8rem; margin: 0.2rem 0;">Demand &nbsp; {demand_score:.3f} x 20%</p>
                 </div>
             </div>
             """, unsafe_allow_html=True)
         with col_insights:
             st.markdown(f'<div class="insights-box">{personal_insights}</div>', unsafe_allow_html=True)
-            st.toast("✓ Your listing has been analysed!", icon="🏠")
+        st.toast("✓ Your listing has been analysed!", icon="🏠")
 
     # Footer
     st.markdown("""
@@ -504,7 +491,7 @@ Be direct, specific, and use the numbers provided.
         &nbsp;·&nbsp; Data: Inside Airbnb (public)
         &nbsp;·&nbsp; Model: GPT-4o-mini
         &nbsp;·&nbsp; Tracing: LangSmith
-        &nbsp;·&nbsp; <a href="https://github.com/ciraci2-netizen/final-project-antonio-ciraci" style="color: #00D4FF; text-decoration: none;">GitHub ↗</a>
+        &nbsp;·&nbsp; <a href="https://github.com/ciraci2-netizen/final-project-antonio-ciraci" style="color: #00D4FF; text-decoration: none;">GitHub &#8599;</a>
     </div>
     """, unsafe_allow_html=True)
 
