@@ -176,7 +176,10 @@ def run_streamlit():
             --border: rgba(0, 212, 255, 0.15);
         }
 
+        /* Remove Streamlit default white padding/margin */
         .stApp { background-color: var(--bg-primary); font-family: 'DM Sans', sans-serif; }
+        .block-container { padding-top: 1rem !important; }
+        header[data-testid="stHeader"] { background-color: var(--bg-primary) !important; }
 
         [data-testid="stSidebar"] {
             background-color: var(--bg-secondary) !important;
@@ -184,7 +187,14 @@ def run_streamlit():
         }
         [data-testid="stSidebar"] * { color: var(--white) !important; }
 
-        .hero-header { padding: 2rem 0 1.5rem 0; border-bottom: 1px solid var(--border); margin-bottom: 2rem; }
+        /* Dropdown options readability */
+        [data-baseweb="select"] * { color: var(--white) !important; background-color: var(--bg-card) !important; }
+        [data-baseweb="popover"] { background-color: var(--bg-card) !important; }
+        [data-baseweb="menu"] { background-color: var(--bg-card) !important; }
+        [data-baseweb="menu"] li { color: #E0EEFF !important; background-color: var(--bg-card) !important; }
+        [data-baseweb="menu"] li:hover { background-color: rgba(0,212,255,0.15) !important; color: var(--cyan) !important; }
+
+        .hero-header { padding: 1.5rem 0 1.5rem 0; border-bottom: 1px solid var(--border); margin-bottom: 2rem; }
         .hero-title { font-family: 'Space Mono', monospace; font-size: 2.4rem; font-weight: 700; color: var(--white); letter-spacing: -0.02em; margin: 0; line-height: 1.1; }
         .hero-title span { color: var(--cyan); }
         .hero-subtitle { font-size: 0.95rem; color: var(--muted); margin-top: 0.5rem; font-weight: 300; letter-spacing: 0.05em; }
@@ -198,7 +208,8 @@ def run_streamlit():
         .kpi-value.cyan { color: var(--cyan); }
         .kpi-value.gold { color: var(--gold); }
 
-        .section-header { font-family: 'Space Mono', monospace; font-size: 0.8rem; color: var(--cyan); text-transform: uppercase; letter-spacing: 0.15em; margin: 2rem 0 1rem 0; display: flex; align-items: center; gap: 10px; }
+        /* Section header — refined, not all-caps mono */
+        .section-header { font-family: 'DM Sans', sans-serif; font-size: 1rem; font-weight: 600; color: var(--cyan); letter-spacing: 0.05em; margin: 2rem 0 1rem 0; display: flex; align-items: center; gap: 10px; }
         .section-header::after { content: ''; flex: 1; height: 1px; background: var(--border); }
 
         [data-testid="stDataFrame"] { border: 1px solid var(--border) !important; border-radius: 8px !important; overflow: hidden; }
