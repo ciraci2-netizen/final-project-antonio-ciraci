@@ -47,20 +47,15 @@ def compute_ranking(df, neighbourhood_filter=None):
         return working
     neighbourhood_median = working.groupby("neighbourhood_group")["price"].transform("median")
     working["price_score"] = 1 - (working["price"] / (neighbourhood_median * 2)).clip(0, 1)
-    
-    # IMPROVED: Review score based on QUALITY (velocity) + QUANTITY
+
     max_reviews = working["number_of_reviews"].max()
     avg_monthly = working["reviews_per_month"].mean()
-    
-    # Quality component: reviews per month (velocity)
+
     quality_score = (working["reviews_per_month"] / max(avg_monthly, 0.1)).clip(0, 1)
-    
-    # Quantity component: total reviews
     quantity_score = working["number_of_reviews"] / max_reviews if max_reviews > 0 else 0
-    
-    # Combined: 60% quality (velocity), 40% quantity (history)
+
     working["review_score"] = (quality_score * 0.6 + quantity_score * 0.4)
-    
+
     neighbourhood_counts = working["neighbourhood_group"].map(working["neighbourhood_group"].value_counts())
     working["demand_score"] = neighbourhood_counts / neighbourhood_counts.max()
     working["ranking_score"] = (working["price_score"] * 0.4 + working["review_score"] * 0.4 + working["demand_score"] * 0.2).round(3)
@@ -107,58 +102,51 @@ Generate 5 actionable insights for an independent host focusing on: pricing vs m
         return f"AI analysis error: {e}"
 
 
-def recommend_optimal_price(host_price, neighbourhood_df):
-    """Calculate optimal price based on market data"""
-    if neighbourhood_df.empty:
+def recommend_optimal_price(host_price, neighbourhood_df, host_room_type=None):
+    """Calculate optimal price based on market data — FIX 6: filter by room type"""
+    working = neighbourhood_df.copy()
+    # FIX 6: filter to same room type for a fair comparison
+    if host_room_type and host_room_type != "All" and "room_type" in working.columns:
+        filtered = working[working["room_type"] == host_room_type]
+        if not filtered.empty:
+            working = filtered
+
+    if working.empty:
         return None, None, None
-    
-    median_price = neighbourhood_df["price"].median()
-    percentile_75 = neighbourhood_df["price"].quantile(0.75)
-    top_10_pct_price = neighbourhood_df.nlargest(int(max(1, len(neighbourhood_df)*0.1)), "ranking_score")["price"].mean()
-    
-    # Price sweet spot: median to 75th percentile for good positioning
-    recommended_low = max(median_price * 0.85, neighbourhood_df["price"].min())
-    recommended_high = min(percentile_75 * 1.05, neighbourhood_df["price"].max())
+
+    median_price = working["price"].median()
+    percentile_75 = working["price"].quantile(0.75)
+
+    recommended_low = max(median_price * 0.85, working["price"].min())
+    recommended_high = min(percentile_75 * 1.05, working["price"].max())
     recommended_mid = (recommended_low + recommended_high) / 2
-    
+
     return round(recommended_mid, 0), round(recommended_low, 0), round(recommended_high, 0)
 
 
 def format_insights_compact(insights_text):
-    """Format insights text into compact numbered format"""
     import re
-    
-    # Split by numbered items (1., 2., 3., etc.)
     points = re.split(r'\n\s*\d+\.\s+', insights_text)
-    
-    # Clean first element if it's not a point
     if points and not re.match(r'^[A-Z]', points[0]):
         header = points[0]
         points = points[1:]
     else:
         header = None
-    
-    return points[:5], header  # Return up to 5 points
+    return points[:5], header
 
 
 def display_insights_expander(insights_text, title="🤖 AI Recommendations"):
-    """Display insights in compact expander format"""
     import streamlit as st
-    
     points, header = format_insights_compact(insights_text)
-    
     with st.expander(title, expanded=True):
         if header:
             st.markdown(f"*{header}*")
-        
         for idx, point in enumerate(points, 1):
             point_clean = point.strip()
             if point_clean:
-                # Extract first line as title
                 lines = point_clean.split('\n')
                 point_title = lines[0][:60].strip()
                 point_detail = '\n'.join(lines)
-                
                 col1, col2 = st.columns([0.1, 0.9])
                 with col1:
                     st.markdown(f"**{idx}.**")
@@ -169,7 +157,6 @@ def display_insights_expander(insights_text, title="🤖 AI Recommendations"):
 
 def get_top_competitors(host_price, host_neighbourhood, host_room_type, df, comp_df_ranked):
     """Find 3 most similar direct competitors"""
-    # Use pre-ranked dataframe if available
     if comp_df_ranked is not None and not comp_df_ranked.empty:
         comp_df = comp_df_ranked.copy()
     else:
@@ -177,197 +164,126 @@ def get_top_competitors(host_price, host_neighbourhood, host_room_type, df, comp
             comp_df = df.copy()
         else:
             comp_df = df[df["neighbourhood_group"] == host_neighbourhood].copy()
-        
-        if host_room_type != "All":
-            comp_df = comp_df[comp_df["room_type"] == host_room_type]
-    
-    # Price similarity: within ±20% of host price
+
+    # FIX 3 prep: always filter by room type for fair comparison
+    if host_room_type and host_room_type != "All" and "room_type" in comp_df.columns:
+        rt_filtered = comp_df[comp_df["room_type"] == host_room_type]
+        if not rt_filtered.empty:
+            comp_df = rt_filtered
+
     price_range = host_price * 0.2
     comp_df = comp_df[
-        (comp_df["price"] >= host_price - price_range) & 
+        (comp_df["price"] >= host_price - price_range) &
         (comp_df["price"] <= host_price + price_range)
     ].copy()
-    
+
     if comp_df.empty:
         return pd.DataFrame()
-    
-    # Rank by most similar (high score + similar price)
+
     if "ranking_score" in comp_df.columns:
         comp_df["similarity"] = comp_df["ranking_score"] - (comp_df["price"] - host_price).abs() / 100
     else:
         comp_df["similarity"] = -(comp_df["price"] - host_price).abs()
-    
+
     cols = ["name", "neighbourhood_group", "room_type", "price", "number_of_reviews"]
     if "ranking_score" in comp_df.columns:
         cols.append("ranking_score")
     available_cols = [c for c in cols if c in comp_df.columns]
-    
+
     return comp_df.nlargest(3, "similarity")[available_cols].reset_index(drop=True)
 
 
 def create_price_strategy_guide(df):
-    """Create price strategy guide visualization"""
     import plotly.graph_objects as go
-    
-    # Define zones
     zones = {
         "Budget 🟢": {"range": [df["price"].min(), 50], "color": "#90EE90", "description": "Max Occupancy"},
         "Mid-Range 🟡": {"range": [50, 80], "color": "#FFD700", "description": "Sweet Spot"},
         "Premium 🔵": {"range": [80, df["price"].max()], "color": "#00D4FF", "description": "High Margin"}
     }
-    
     zone_stats = []
     for zone_name, zone_info in zones.items():
         min_price, max_price = zone_info["range"]
         zone_data = df[(df["price"] >= min_price) & (df["price"] < max_price)]
-        
         if not zone_data.empty:
             zone_stats.append({
-                "Zone": zone_name,
-                "Count": len(zone_data),
+                "Zone": zone_name, "Count": len(zone_data),
                 "Pct": round((len(zone_data) / len(df)) * 100, 1),
                 "Avg Score": round(zone_data["ranking_score"].mean(), 3),
                 "Avg Reviews": round(zone_data["number_of_reviews"].mean(), 0),
                 "Price Range": f"€{min_price:.0f}-€{max_price:.0f}",
-                "Color": zone_info["color"],
-                "Description": zone_info["description"]
+                "Color": zone_info["color"], "Description": zone_info["description"]
             })
-    
     zone_df = pd.DataFrame(zone_stats)
-    
-    # Create figure
     fig = go.Figure()
-    
     for idx, row in zone_df.iterrows():
         fig.add_trace(go.Bar(
-            y=[row["Zone"]],
-            x=[row["Count"]],
-            orientation='h',
+            y=[row["Zone"]], x=[row["Count"]], orientation='h',
             marker=dict(color=row["Color"]),
             text=f"{row['Pct']}% | {int(row['Count'])} listings<br>Avg Score: {row['Avg Score']}<br>Avg Reviews: {int(row['Avg Reviews'])}<br>{row['Price Range']}",
-            textposition="auto",
-            textfont=dict(color="#0A1628", size=11, family="Space Mono"),
+            textposition="auto", textfont=dict(color="#0A1628", size=11, family="Space Mono"),
             hovertemplate=f"<b>{row['Zone']}</b><br>Listings: {int(row['Count'])} ({row['Pct']}%)<br>Avg Score: {row['Avg Score']}<br>Avg Reviews: {int(row['Avg Reviews'])}<extra></extra>",
-            name=row["Zone"],
-            showlegend=False
+            name=row["Zone"], showlegend=False
         ))
-    
     fig.update_layout(
-        paper_bgcolor="#0A1628",
-        plot_bgcolor="#0A1628",
-        font=dict(color="#C8D8E8", family="Space Mono"),
-        height=250,
+        paper_bgcolor="#0A1628", plot_bgcolor="#0A1628",
+        font=dict(color="#C8D8E8", family="Space Mono"), height=250,
         margin=dict(l=100, r=20, t=20, b=20),
-        xaxis=dict(
-            title="Number of Listings",
-            gridcolor="rgba(0,212,255,0.08)",
-            color="#8899AA"
-        ),
-        yaxis=dict(
-            color="#C8D8E8",
-            tickfont=dict(size=12, family="Space Mono")
-        ),
+        xaxis=dict(title="Number of Listings", gridcolor="rgba(0,212,255,0.08)", color="#8899AA"),
+        yaxis=dict(color="#C8D8E8", tickfont=dict(size=12, family="Space Mono")),
     )
-    
     return fig, zone_df
 
 
 def create_growth_roadmap(host_reviews, host_price, host_neighbourhood, comp_df):
-    """Create personalized growth roadmap to Bestseller status"""
-    
-    # Determine current tier
     if host_reviews >= 100:
-        current_tier = "Bestseller 🌟"
-        target_tier = "Elite 👑"
-        target_reviews = 150
+        current_tier = "Bestseller 🌟"; target_tier = "Elite 👑"; target_reviews = 150
     elif host_reviews >= 50:
-        current_tier = "Established ⭐"
-        target_tier = "Bestseller 🌟"
-        target_reviews = 100
+        current_tier = "Established ⭐"; target_tier = "Bestseller 🌟"; target_reviews = 100
     elif host_reviews >= 20:
-        current_tier = "Rising Star 📈"
-        target_tier = "Established ⭐"
-        target_reviews = 50
+        current_tier = "Rising Star 📈"; target_tier = "Established ⭐"; target_reviews = 50
     else:
-        current_tier = "New Host 🆕"
-        target_tier = "Rising Star 📈"
-        target_reviews = 20
-    
-    # Calculate required monthly reviews
+        current_tier = "New Host 🆕"; target_tier = "Rising Star 📈"; target_reviews = 20
     reviews_needed = max(0, target_reviews - host_reviews)
     monthly_rate = comp_df[comp_df['number_of_reviews'] > 0]['reviews_per_month'].mean()
     months_needed = max(1, reviews_needed / max(monthly_rate, 0.5))
-    
-    # Timeline & milestones
     milestone_1 = host_reviews + (monthly_rate * max(1, months_needed / 3))
     milestone_2 = host_reviews + (monthly_rate * max(1, months_needed * 2/3))
     milestone_3 = target_reviews
-    
     return {
-        "current_tier": current_tier,
-        "target_tier": target_tier,
-        "target_reviews": target_reviews,
-        "reviews_needed": reviews_needed,
-        "monthly_rate": monthly_rate,
-        "months_needed": months_needed,
-        "milestone_1": milestone_1,
-        "milestone_2": milestone_2,
-        "milestone_3": milestone_3
+        "current_tier": current_tier, "target_tier": target_tier,
+        "target_reviews": target_reviews, "reviews_needed": reviews_needed,
+        "monthly_rate": monthly_rate, "months_needed": months_needed,
+        "milestone_1": milestone_1, "milestone_2": milestone_2, "milestone_3": milestone_3
     }
 
 
 def calculate_review_quality(host_reviews, reviews_per_month, comp_df):
-    """Calculate review quality metrics"""
-    
     avg_monthly = comp_df["reviews_per_month"].mean()
     max_reviews = comp_df["number_of_reviews"].max()
-    
-    # Velocity score: how active is the host?
     velocity_score = min(1.0, (reviews_per_month / max(avg_monthly, 0.1)))
-    
-    # Consistency score: is the host maintaining bookings?
     if reviews_per_month > 0:
         consistency_score = 0.9 if reviews_per_month > 0.5 else 0.7 if reviews_per_month > 0.2 else 0.5
     else:
         consistency_score = 0.3
-    
-    # Recency score: how recent are reviews? (approximated)
-    # More reviews/month = more recent activity
     recency_score = min(1.0, (reviews_per_month / max(avg_monthly, 0.1)))
-    
-    # Overall quality (weighted average)
     quality_score = (velocity_score * 0.5 + consistency_score * 0.35 + recency_score * 0.15)
-    
     return {
-        "velocity_score": velocity_score,
-        "consistency_score": consistency_score,
-        "recency_score": recency_score,
-        "quality_score": quality_score,
+        "velocity_score": velocity_score, "consistency_score": consistency_score,
+        "recency_score": recency_score, "quality_score": quality_score,
         "status": "🟢 Excellent" if quality_score >= 0.8 else "🟡 Good" if quality_score >= 0.6 else "🔴 Needs Work"
     }
 
 
 def calculate_kpi_metrics(listing_row):
-    """Calculate key performance indicators for a listing"""
     from datetime import datetime
-    import pandas as pd
-    
     price = listing_row["price"]
     availability = listing_row["availability_365"]
     reviews_ltm = listing_row["number_of_reviews_ltm"]
     reviews_per_month = listing_row["reviews_per_month"]
     last_review = listing_row["last_review"]
-    
-    # Occupancy Rate (%)
     occupancy_rate = (365 - availability) / 365 * 100
-    
-    # ADR (Average Daily Rate)
     adr = price
-    
-    # RevPAR (Revenue Per Available Room)
     revpar = (occupancy_rate / 100) * adr
-    
-    # Days since last review
     days_since_last_review = "N/A"
     if pd.notna(last_review) and str(last_review) != "nan":
         try:
@@ -376,34 +292,23 @@ def calculate_kpi_metrics(listing_row):
             days_since_last_review = days_since
         except:
             days_since_last_review = "N/A"
-    
     return {
-        "occupancy_rate": occupancy_rate,
-        "adr": adr,
-        "revpar": revpar,
-        "reviews_ltm": reviews_ltm,
-        "days_since_last_review": days_since_last_review,
+        "occupancy_rate": occupancy_rate, "adr": adr, "revpar": revpar,
+        "reviews_ltm": reviews_ltm, "days_since_last_review": days_since_last_review,
         "reviews_per_month": reviews_per_month
     }
 
 
 def calculate_revenue_impact(host_price, optimal_price, current_reviews_per_month, market_avg_reviews_per_month, occupancy_rate):
-    """Calculate revenue impact: how much is the host losing/gaining"""
-    # Monthly revenue loss from suboptimal pricing
     price_diff = optimal_price - host_price
     monthly_bookings = max(current_reviews_per_month, 1)
-    monthly_revenue_loss = price_diff * monthly_bookings * 30  # Assuming 30-day month
+    monthly_revenue_loss = price_diff * monthly_bookings * 30
     annual_revenue_impact = monthly_revenue_loss * 12
-    
-    # Revenue potential from better positioning
     activity_ratio = market_avg_reviews_per_month / max(current_reviews_per_month, 0.1) if current_reviews_per_month > 0 else 2.0
-    activity_ratio = min(activity_ratio, 3.0)  # Cap at 3x
-    
+    activity_ratio = min(activity_ratio, 3.0)
     potential_monthly_bookings = monthly_bookings * activity_ratio
     revenue_gain_from_activity = (potential_monthly_bookings - monthly_bookings) * optimal_price * 30
-    
-    total_potential = monthly_revenue_loss + (revenue_gain_from_activity / 12)  # Monthly potential
-    
+    total_potential = monthly_revenue_loss + (revenue_gain_from_activity / 12)
     return {
         "monthly_loss_from_price": monthly_revenue_loss,
         "annual_loss_from_price": annual_revenue_impact,
@@ -415,113 +320,10 @@ def calculate_revenue_impact(host_price, optimal_price, current_reviews_per_mont
     }
 
 
-def create_price_comparison_bar(current_price, recommended_price, max_price, min_price):
-    """Create visual bar comparing current vs recommended price"""
-    # Normalize to 0-100 scale
-    price_range = max_price - min_price
-    current_pos = ((current_price - min_price) / price_range * 100) if price_range > 0 else 50
-    recommended_pos = ((recommended_price - min_price) / price_range * 100) if price_range > 0 else 50
-    
-    # Create SVG visualization
-    svg = f"""
-    <svg width="100%" height="60" viewBox="0 0 800 60" style="background:#132140; border-radius:8px; border:1px solid rgba(0,212,255,0.2);">
-        <!-- Background track -->
-        <rect x="60" y="20" width="720" height="20" fill="rgba(0,212,255,0.05)" stroke="rgba(0,212,255,0.2)" stroke-width="1"/>
-        
-        <!-- Price zones -->
-        <rect x="60" y="20" width="240" height="20" fill="rgba(255, 107, 107, 0.1)" opacity="0.7"/>
-        <text x="120" y="45" font-size="11" fill="#FF6B6B" text-anchor="middle" font-weight="600">Budget</text>
-        
-        <rect x="300" y="20" width="240" height="20" fill="rgba(255, 215, 0, 0.1)" opacity="0.7"/>
-        <text x="420" y="45" font-size="11" fill="#FFD700" text-anchor="middle" font-weight="600">Mid-Range</text>
-        
-        <rect x="540" y="20" width="240" height="20" fill="rgba(144, 238, 144, 0.1)" opacity="0.7"/>
-        <text x="660" y="45" font-size="11" fill="#90EE90" text-anchor="middle" font-weight="600">Premium</text>
-        
-        <!-- Current price marker -->
-        <line x1="{60 + current_pos * 7.2}" y1="15" x2="{60 + current_pos * 7.2}" y2="50" stroke="#00D4FF" stroke-width="3" stroke-dasharray="5,5"/>
-        <circle cx="{60 + current_pos * 7.2}" cy="58" r="4" fill="#00D4FF"/>
-        <text x="{60 + current_pos * 7.2}" y="10" font-size="11" fill="#00D4FF" text-anchor="middle" font-weight="700">CURRENT</text>
-        
-        <!-- Recommended price marker -->
-        <line x1="{60 + recommended_pos * 7.2}" y1="15" x2="{60 + recommended_pos * 7.2}" y2="50" stroke="#90EE90" stroke-width="3"/>
-        <circle cx="{60 + recommended_pos * 7.2}" cy="58" r="5" fill="none" stroke="#90EE90" stroke-width="2"/>
-        <text x="{60 + recommended_pos * 7.2}" y="10" font-size="11" fill="#90EE90" text-anchor="middle" font-weight="700">TARGET</text>
-    </svg>
-    """
-    return svg
-
-
-def generate_pdf_report(host_name, selected_listing, competitors, revenue_impact, positioning_rec, positioned_name):
-    """Generate downloadable PDF report"""
-    from datetime import datetime
-    try:
-        from reportlab.lib.pagesizes import letter
-        from reportlab.lib import colors
-        from reportlab.lib.units import inch
-        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak
-        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-        
-        # Create PDF
-        filename = f"BerlinHostAIQ_Report_{host_name.replace(' ', '_')}_{datetime.now().strftime('%Y%m%d')}.pdf"
-        doc = SimpleDocTemplate(filename, pagesize=letter)
-        
-        # Build story
-        story = []
-        styles = getSampleStyleSheet()
-        
-        # Title
-        title_style = ParagraphStyle(
-            'CustomTitle',
-            parent=styles['Heading1'],
-            fontSize=24,
-            textColor=colors.HexColor('#00D4FF'),
-            spaceAfter=30,
-        )
-        story.append(Paragraph(f"BerlinHostAIQ Revenue Report", title_style))
-        story.append(Spacer(1, 0.3*inch))
-        
-        # Summary
-        summary_data = [
-            ['METRIC', 'VALUE'],
-            ['Current Annual Revenue', f"€{(selected_listing['price'] * max(selected_listing['reviews_per_month'], 1) * 30 * 12):.0f}"],
-            ['Monthly Opportunity', f"€{revenue_impact['monthly_total_potential']:.0f}"],
-            ['Annual Upside', f"€{revenue_impact['annual_total_potential']:.0f}"],
-            ['Recommended Price', f"€{selected_listing['price']:.0f}"],
-            ['Recommended Positioning', positioned_name],
-        ]
-        
-        summary_table = Table(summary_data, colWidths=[2*inch, 2*inch])
-        summary_table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#0F1F38')),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.HexColor('#00D4FF')),
-            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, 0), 11),
-            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-            ('GRID', (0, 0), (-1, -1), 1, colors.HexColor('0A1628')),
-            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.HexColor('#132140'), colors.HexColor('0F1F38')]),
-        ]))
-        
-        story.append(summary_table)
-        story.append(Spacer(1, 0.5*inch))
-        
-        # Build PDF
-        doc.build(story)
-        return filename
-    except ImportError:
-        return None
-
-
 def create_report_breakdown_saas(revenue_impact, recommended_price, current_price, host_reviews, positioning_rec, market_stats):
-    """Create SaaS-style report breakdown with structured sections"""
-    
     sections = []
-    
-    # Section 1: PRICING OPPORTUNITY
     price_gap = recommended_price - current_price
     price_gap_pct = (price_gap / current_price * 100) if current_price > 0 else 0
-    
     pricing_section = f"""
     <div style="background:#132140; border:1px solid rgba(0,212,255,0.2); border-radius:8px; padding:1.5rem; margin-bottom:1.5rem;">
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:1.5rem;">
@@ -541,12 +343,8 @@ def create_report_breakdown_saas(revenue_impact, recommended_price, current_pric
         </div>
     </div>
     """
-    
     sections.append(pricing_section)
-    
-    # Section 2: REVIEW VELOCITY
     velocity_target = market_stats['median_activity'] if 'median_activity' in market_stats else 0.7
-    
     velocity_section = f"""
     <div style="background:#132140; border:1px solid rgba(255,215,0,0.2); border-radius:8px; padding:1.5rem; margin-bottom:1.5rem;">
         <p style="color:#FFD700; font-size:0.7rem; text-transform:uppercase; margin:0 0 1rem; letter-spacing:0.1em;"><b>⚡ Review Velocity</b></p>
@@ -562,14 +360,11 @@ def create_report_breakdown_saas(revenue_impact, recommended_price, current_pric
             </div>
         </div>
         <div style="margin-top:1rem; padding-top:1rem; border-top:1px solid rgba(255,215,0,0.1);">
-            <p style="color:#FFD700; font-size:0.85rem; margin:0;"><b>🔄 Action:</b> Improve response time to <1 hour. Add availability for weekends.</p>
+            <p style="color:#FFD700; font-size:0.85rem; margin:0;"><b>🔄 Action:</b> Improve response time to &lt;1 hour. Add availability for weekends.</p>
         </div>
     </div>
     """
-    
     sections.append(velocity_section)
-    
-    # Section 3: POSITIONING
     positioning_section = f"""
     <div style="background:#132140; border:1px solid rgba(144,238,144,0.2); border-radius:8px; padding:1.5rem; margin-bottom:1.5rem;">
         <p style="color:#90EE90; font-size:0.7rem; text-transform:uppercase; margin:0 0 1rem; letter-spacing:0.1em;"><b>🎯 Strategic Positioning</b></p>
@@ -578,14 +373,11 @@ def create_report_breakdown_saas(revenue_impact, recommended_price, current_pric
             <p style="color:#C8D8E8; font-size:0.85rem; margin:0;">Focus on this segment to differentiate from competitors.</p>
         </div>
         <div style="margin-top:1rem; padding-top:1rem; border-top:1px solid rgba(144,238,144,0.1);">
-            <p style="color:#90EE90; font-size:0.85rem; margin:0;"><b>💡 Action:</b> Update listing title & description to emphasize this positioning.</p>
+            <p style="color:#90EE90; font-size:0.85rem; margin:0;"><b>💡 Action:</b> Update listing title &amp; description to emphasize this positioning.</p>
         </div>
     </div>
     """
-    
     sections.append(positioning_section)
-    
-    # Section 4: QUICK WINS
     quick_wins = f"""
     <div style="background:#132140; border:1px solid rgba(0,212,255,0.2); border-radius:8px; padding:1.5rem;">
         <p style="color:#00D4FF; font-size:0.7rem; text-transform:uppercase; margin:0 0 1rem; letter-spacing:0.1em;"><b>⚡ Quick Wins (This Week)</b></p>
@@ -600,24 +392,17 @@ def create_report_breakdown_saas(revenue_impact, recommended_price, current_pric
             </div>
             <div style="background:rgba(0,212,255,0.05); padding:0.8rem; border-radius:6px; border-left:2px solid #00D4FF;">
                 <p style="color:#00D4FF; font-weight:700; font-size:0.85rem; margin:0;"> 3. Refresh photos</p>
-                <p style="color:#C8D8E8; font-size:0.75rem; margin:0;">Add natural lighting & lifestyle images</p>
+                <p style="color:#C8D8E8; font-size:0.75rem; margin:0;">Add natural lighting &amp; lifestyle images</p>
             </div>
         </div>
     </div>
     """
-    
     sections.append(quick_wins)
-    
     return "\n".join(sections)
 
 
 def create_competitive_comparison(your_listing, competitors_df):
-    """Create detailed competitive comparison table"""
-    import pandas as pd
-    
     comparison_data = []
-    
-    # Your listing
     your_data = {
         "Listing": "🏆 YOUR LISTING",
         "Price (€/night)": f"€{your_listing['price']:.0f}",
@@ -627,8 +412,6 @@ def create_competitive_comparison(your_listing, competitors_df):
         "Availability": f"{365 - your_listing['availability_365']} days"
     }
     comparison_data.append(your_data)
-    
-    # Top competitors (top 3)
     for idx, (_, comp) in enumerate(competitors_df.head(3).iterrows(), 1):
         comp_data = {
             "Listing": f"#{idx} Competitor",
@@ -639,59 +422,28 @@ def create_competitive_comparison(your_listing, competitors_df):
             "Availability": f"{365 - comp['availability_365']} days"
         }
         comparison_data.append(comp_data)
-    
     return pd.DataFrame(comparison_data)
 
 
 def analyze_positioning_opportunity(listing_df, neighbourhood, room_type):
-    """Analyze positioning opportunities in the market"""
-    import pandas as pd
-    
-    # Filter to same neighbourhood and room type
     same_market = listing_df[
-        (listing_df['neighbourhood'] == neighbourhood) & 
+        (listing_df['neighbourhood'] == neighbourhood) &
         (listing_df['room_type'] == room_type) &
         (listing_df['price'].notna()) &
         (listing_df['reviews_per_month'].notna())
     ]
-    
     if len(same_market) == 0:
         return None
-    
-    # Positioning heuristics based on price and activity quantiles
     price_q25 = same_market['price'].quantile(0.25)
     price_q75 = same_market['price'].quantile(0.75)
     activity_q50 = same_market['reviews_per_month'].median()
-    
-    # Define positioning profiles
     positionings = {
-        "🏡 Family-friendly": {
-            "price_range": (price_q25, price_q75),
-            "ideal_activity": activity_q50,
-            "description": "Spacious, welcoming for families with children"
-        },
-        "💼 Smart Working": {
-            "price_range": (price_q75 * 0.8, price_q75 * 1.2),
-            "ideal_activity": activity_q50 * 1.1,
-            "description": "High-speed WiFi, dedicated workspace, quiet"
-        },
-        "✨ Luxury/Design": {
-            "price_range": (price_q75 * 1.1, price_q75 * 2),
-            "ideal_activity": activity_q50 * 0.8,
-            "description": "Premium design, exclusive experience, premium amenities"
-        },
-        "💰 Budget Efficient": {
-            "price_range": (price_q25 * 0.7, price_q25 * 1.1),
-            "ideal_activity": activity_q50 * 1.3,
-            "description": "Affordable, high occupancy, good value"
-        },
-        "🌍 Local Experience": {
-            "price_range": (price_q25, price_q75 * 1.5),
-            "ideal_activity": activity_q50,
-            "description": "Authentic Berlin, local knowledge, neighborhood integration"
-        }
+        "🏡 Family-friendly": {"price_range": (price_q25, price_q75), "ideal_activity": activity_q50, "description": "Spacious, welcoming for families with children"},
+        "💼 Smart Working": {"price_range": (price_q75 * 0.8, price_q75 * 1.2), "ideal_activity": activity_q50 * 1.1, "description": "High-speed WiFi, dedicated workspace, quiet"},
+        "✨ Luxury/Design": {"price_range": (price_q75 * 1.1, price_q75 * 2), "ideal_activity": activity_q50 * 0.8, "description": "Premium design, exclusive experience, premium amenities"},
+        "💰 Budget Efficient": {"price_range": (price_q25 * 0.7, price_q25 * 1.1), "ideal_activity": activity_q50 * 1.3, "description": "Affordable, high occupancy, good value"},
+        "🌍 Local Experience": {"price_range": (price_q25, price_q75 * 1.5), "ideal_activity": activity_q50, "description": "Authentic Berlin, local knowledge, neighborhood integration"}
     }
-    
     return {
         "market_stats": {
             "avg_price": same_market['price'].mean(),
@@ -706,11 +458,8 @@ def analyze_positioning_opportunity(listing_df, neighbourhood, room_type):
 
 
 def get_positioning_recommendation(listing_price, listing_activity, market_stats):
-    """Recommend best positioning based on listing characteristics"""
-    
     price_ratio = listing_price / market_stats['median_price']
     activity_ratio = listing_activity / market_stats['median_activity'] if market_stats['median_activity'] > 0 else 0
-    
     if price_ratio < 0.85:
         if activity_ratio > 1.2:
             return "💰 Budget Efficient", "Strong volume positioning - high demand at competitive price"
@@ -728,85 +477,8 @@ def get_positioning_recommendation(listing_price, listing_activity, market_stats
             return "✨ Luxury/Design", "Premium price - enhance listing with luxury positioning to justify rate"
 
 
-def create_competitive_comparison(your_listing, competitors_df):
-    """Create detailed competitive comparison table"""
-    import pandas as pd
-    
-    comparison_data = []
-    
-    # Your listing
-    your_data = {
-        "Listing": "🏆 YOUR LISTING",
-        "Price (€/night)": f"€{your_listing['price']:.0f}",
-        "Total Reviews": f"{your_listing['number_of_reviews']}",
-        "Reviews/Month": f"{your_listing['reviews_per_month']:.2f}",
-        "Room Type": your_listing['room_type'],
-        "Availability": f"{365 - your_listing['availability_365']} days"
-    }
-    comparison_data.append(your_data)
-    
-    # Top competitors (top 3)
-    for idx, (_, comp) in enumerate(competitors_df.head(3).iterrows(), 1):
-        comp_data = {
-            "Listing": f"#{idx} Competitor",
-            "Price (€/night)": f"€{comp['price']:.0f}",
-            "Total Reviews": f"{comp['number_of_reviews']}",
-            "Reviews/Month": f"{comp['reviews_per_month']:.2f}",
-            "Room Type": comp['room_type'],
-            "Availability": f"{365 - comp['availability_365']} days"
-        }
-        comparison_data.append(comp_data)
-    
-    return pd.DataFrame(comparison_data)
-
-
-def calculate_kpi_metrics(listing_row):
-    """Calculate key performance indicators for a listing"""
-    from datetime import datetime
-    import pandas as pd
-    
-    price = listing_row["price"]
-    availability = listing_row["availability_365"]
-    reviews_ltm = listing_row["number_of_reviews_ltm"]
-    reviews_per_month = listing_row["reviews_per_month"]
-    last_review = listing_row["last_review"]
-    
-    # Occupancy Rate (%)
-    occupancy_rate = (365 - availability) / 365 * 100
-    
-    # ADR (Average Daily Rate)
-    adr = price
-    
-    # RevPAR (Revenue Per Available Room)
-    revpar = (occupancy_rate / 100) * adr
-    
-    # Days since last review
-    days_since_last_review = "N/A"
-    if pd.notna(last_review) and str(last_review) != "nan":
-        try:
-            last_review_date = pd.to_datetime(last_review)
-            days_since = (datetime.now() - last_review_date).days
-            days_since_last_review = days_since
-        except:
-            days_since_last_review = "N/A"
-    
-    return {
-        "occupancy_rate": occupancy_rate,
-        "adr": adr,
-        "revpar": revpar,
-        "reviews_ltm": reviews_ltm,
-        "days_since_last_review": days_since_last_review,
-        "reviews_per_month": reviews_per_month
-    }
-
-
 def calculate_revenue_scenarios(host_price, comp_df, neighbourhood_median):
-    """Calculate revenue under different price scenarios"""
-    
-    # Estimate occupancy based on price positioning
     price_ratio = host_price / neighbourhood_median
-    
-    # Price elasticity: lower price = higher occupancy
     if price_ratio < 0.8:
         occupancy_base = 0.65
     elif price_ratio < 1.0:
@@ -815,97 +487,57 @@ def calculate_revenue_scenarios(host_price, comp_df, neighbourhood_median):
         occupancy_base = 0.45
     else:
         occupancy_base = 0.35
-    
     scenarios = []
-    prices = [
-        host_price - 20,
-        host_price - 10,
-        host_price,
-        host_price + 10,
-        host_price + 20
-    ]
-    
+    prices = [host_price - 20, host_price - 10, host_price, host_price + 10, host_price + 20]
     for price in prices:
-        price = max(10, price)  # Min price boundary
-        
-        # Adjust occupancy based on price change
+        price = max(10, price)
         price_diff_pct = (price - host_price) / host_price if host_price > 0 else 0
-        occupancy_adj = occupancy_base * (1 - price_diff_pct * 0.3)  # -30% occupancy per +10% price
+        occupancy_adj = occupancy_base * (1 - price_diff_pct * 0.3)
         occupancy = max(0.1, min(0.95, occupancy_adj))
-        
         monthly_revenue = price * 30 * occupancy
         annual_revenue = monthly_revenue * 12
-        
-        # Estimate ranking position based on price
         cheaper_listings = len(comp_df[comp_df['price'] < price])
         rank_position = cheaper_listings
-        
         scenarios.append({
-            "price": round(price, 0),
-            "occupancy": round(occupancy * 100, 1),
-            "monthly_revenue": round(monthly_revenue, 0),
-            "annual_revenue": round(annual_revenue, 0),
-            "rank_position": rank_position,
+            "Price": f"€{int(price)}",
+            "Monthly": f"€{int(monthly_revenue)}",
+            "Annual": f"€{int(annual_revenue)}",
+            "Occupancy": f"{occupancy * 100:.0f}%",
+            "Position": f"#{rank_position}",
             "is_current": abs(price - host_price) < 1
         })
-    
     return scenarios
 
 
 def analyze_review_intelligence(df):
-    """Analyze review patterns and host tiers"""
     df_analysis = df.dropna(subset=['number_of_reviews', 'reviews_per_month']).copy()
-    
     if df_analysis.empty:
         return None, None, None, None
-    
-    # 1. Review Velocity - hosts with most recent activity
     df_analysis['review_velocity'] = df_analysis['number_of_reviews'] / (df_analysis['availability_365'] + 1) * 365
-    
-    # 2. Host Tiers based on reviews
     def categorize_tier(reviews):
-        if reviews >= 100:
-            return "Bestseller 🌟"
-        elif reviews >= 50:
-            return "Established ⭐"
-        elif reviews >= 20:
-            return "Rising Star 📈"
-        else:
-            return "New Host 🆕"
-    
+        if reviews >= 100: return "Bestseller 🌟"
+        elif reviews >= 50: return "Established ⭐"
+        elif reviews >= 20: return "Rising Star 📈"
+        else: return "New Host 🆕"
     df_analysis['host_tier'] = df_analysis['number_of_reviews'].apply(categorize_tier)
-    
-    # 3. Review conversion (reviews per availability - higher is better)
     df_analysis['review_conversion'] = (df_analysis['number_of_reviews'] / (366 - df_analysis['availability_365'] + 1)).clip(0, 1)
-    
-    # 4. Tier statistics
     tier_stats = df_analysis.groupby('host_tier').agg({
-        'number_of_reviews': ['mean', 'count'],
-        'price': 'mean',
-        'ranking_score': 'mean',
-        'reviews_per_month': 'mean',
-        'review_conversion': 'mean'
+        'number_of_reviews': ['mean', 'count'], 'price': 'mean',
+        'ranking_score': 'mean', 'reviews_per_month': 'mean', 'review_conversion': 'mean'
     }).round(2)
-    
-    # 5. Top performing characteristics by room type
     top_perf = df_analysis[df_analysis['number_of_reviews'] >= df_analysis['number_of_reviews'].quantile(0.75)]
-    
     return tier_stats, df_analysis, top_perf, df_analysis['host_tier'].value_counts()
 
 
 LANG = {
     "EN": {
-        "hero_title": "BerlinHostAIQ",
-        "hero_subtitle": "💰 Discover how much you're losing on your Airbnb — and how to earn more",
-        "hero_analysis": "✅ Analysis in 30 seconds",
-        "hero_desc1": "We compare your listing vs 9,264 Berlin properties",
+        "hero_title": "BerlinHostAIQ", "hero_subtitle": "💰 Discover how much you're losing on your Airbnb — and how to earn more",
+        "hero_analysis": "✅ Analysis in 30 seconds", "hero_desc1": "We compare your listing vs 9,264 Berlin properties",
         "hero_desc2": "Discover: optimal price, competitors, growth strategies",
         "filters": "Filters", "neighbourhood": "Neighbourhood", "room_type": "Room type",
-        "top_n": "Top listings to analyse",
-        "rankings": "Top Ranked Listings",
+        "top_n": "Top listings to analyse", "rankings": "Top Ranked Listings",
         "caption": "Score = Price competitiveness (40%) + Review velocity (40%) + Neighbourhood demand (20%)",
-        "map_title": "Berlin Neighbourhoods — Price & Demand",
-        "chart_title": "Median Price by Neighbourhood",
+        "map_title": "Berlin Neighbourhoods — Price & Demand", "chart_title": "Median Price by Neighbourhood",
         "insights_title": "AI Competitive Insights", "generate": "Generate Insights →",
         "analyse_title": "Analyse My Listing", "how_it_works": "HOW IT WORKS",
         "how_text": "Enter your listing details — Discover instantly how much you're losing and how to earn more money.",
@@ -913,25 +545,20 @@ LANG = {
         "reviews_label": "Number of reviews",
         "amenities_label": "Key amenities (e.g. balcony, garden, parking, wifi)",
         "submit": "💰 Discover My Potential →", "your_score": "YOUR SCORE", "beats": "beats",
-        "breakdown": "SCORE BREAKDOWN",
-        "total": "Total Listings", "median": "Median Price", "avg": "Avg Reviews", "top": "Top Score",
+        "breakdown": "SCORE BREAKDOWN", "total": "Total Listings", "median": "Median Price",
+        "avg": "Avg Reviews", "top": "Top Score",
         "spinner_market": "Analysing market data with GPT-4o-mini...",
         "spinner_listing": "Ranking your listing vs competitors...",
-        "toast_market": "✓ Analysis complete!", "toast_listing": "✓ Your listing has been analysed!",
-        "night": "/night",
+        "toast_market": "✓ Analysis complete!", "toast_listing": "✓ Your listing has been analysed!", "night": "/night",
     },
     "IT": {
-        "hero_title": "BerlinHostAIQ",
-        "hero_subtitle": "💰 Scopri quanto stai perdendo sul tuo Airbnb — e come guadagnare di più",
-        "hero_analysis": "✅ Analisi in 30 secondi",
-        "hero_desc1": "Confrontiamo il tuo annuncio vs 9,264 listing di Berlino",
+        "hero_title": "BerlinHostAIQ", "hero_subtitle": "💰 Scopri quanto stai perdendo sul tuo Airbnb — e come guadagnare di più",
+        "hero_analysis": "✅ Analisi in 30 secondi", "hero_desc1": "Confrontiamo il tuo annuncio vs 9,264 listing di Berlino",
         "hero_desc2": "Scopri: prezzo ottimale, competitors, strategie di growth",
         "filters": "Filtri", "neighbourhood": "Quartiere", "room_type": "Tipo di stanza",
-        "top_n": "Top listing da analizzare",
-        "rankings": "Top Listing per Ranking",
+        "top_n": "Top listing da analizzare", "rankings": "Top Listing per Ranking",
         "caption": "Score = Competitivita prezzo (40%) + Velocita recensioni (40%) + Domanda quartiere (20%)",
-        "map_title": "Quartieri di Berlino — Prezzi & Domanda",
-        "chart_title": "Prezzo Mediano per Quartiere",
+        "map_title": "Quartieri di Berlino — Prezzi & Domanda", "chart_title": "Prezzo Mediano per Quartiere",
         "insights_title": "AI Competitive Insights", "generate": "Genera Insights →",
         "analyse_title": "Analizza il mio Listing", "how_it_works": "COME FUNZIONA",
         "how_text": "Inserisci prezzo, quartiere e recensioni — scoprirai subito quanto stai perdendo e come recuperare i soldi persi.",
@@ -939,25 +566,20 @@ LANG = {
         "reviews_label": "Numero di recensioni",
         "amenities_label": "Amenities principali (es. balcone, giardino, parcheggio, wifi)",
         "submit": "💰 Scopri il mio potenziale →", "your_score": "IL TUO SCORE", "beats": "supera",
-        "breakdown": "DETTAGLIO SCORE",
-        "total": "Listing Totali", "median": "Prezzo Mediano", "avg": "Recensioni Medie", "top": "Top Score",
+        "breakdown": "DETTAGLIO SCORE", "total": "Listing Totali", "median": "Prezzo Mediano",
+        "avg": "Recensioni Medie", "top": "Top Score",
         "spinner_market": "Analisi dati di mercato con GPT-4o-mini...",
         "spinner_listing": "Posizionamento del tuo listing vs competitor...",
-        "toast_market": "✓ Analisi completata!", "toast_listing": "✓ Il tuo listing e stato analizzato!",
-        "night": "/notte",
+        "toast_market": "✓ Analisi completata!", "toast_listing": "✓ Il tuo listing e stato analizzato!", "night": "/notte",
     },
     "DE": {
-        "hero_title": "BerlinHostAIQ",
-        "hero_subtitle": "💰 Entdecken Sie, wie viel Sie mit Ihrem Airbnb verlieren — und wie Sie mehr verdienen",
-        "hero_analysis": "✅ Analyse in 30 Sekunden",
-        "hero_desc1": "Wir vergleichen Ihr Inserat mit 9.264 Berliner Objekten",
+        "hero_title": "BerlinHostAIQ", "hero_subtitle": "💰 Entdecken Sie, wie viel Sie mit Ihrem Airbnb verlieren — und wie Sie mehr verdienen",
+        "hero_analysis": "✅ Analyse in 30 Sekunden", "hero_desc1": "Wir vergleichen Ihr Inserat mit 9.264 Berliner Objekten",
         "hero_desc2": "Entdecken Sie: optimaler Preis, Konkurrenten, Wachstumsstrategien",
         "filters": "Filter", "neighbourhood": "Bezirk", "room_type": "Zimmertyp",
-        "top_n": "Top-Inserate analysieren",
-        "rankings": "Top-Inserate nach Ranking",
+        "top_n": "Top-Inserate analysieren", "rankings": "Top-Inserate nach Ranking",
         "caption": "Score = Preiswettbewerb (40%) + Bewertungsgeschwindigkeit (40%) + Bezirksnachfrage (20%)",
-        "map_title": "Berliner Bezirke — Preise & Nachfrage",
-        "chart_title": "Medianpreis nach Bezirk",
+        "map_title": "Berliner Bezirke — Preise & Nachfrage", "chart_title": "Medianpreis nach Bezirk",
         "insights_title": "KI-Wettbewerbsanalyse", "generate": "Insights generieren →",
         "analyse_title": "Mein Inserat analysieren", "how_it_works": "SO FUNKTIONIERT ES",
         "how_text": "Geben Sie Ihren Preis, Bezirk und Bewertungen ein — entdecken Sie sofort, wie viel Sie verlieren und wie Sie mehr verdienen.",
@@ -965,12 +587,10 @@ LANG = {
         "reviews_label": "Anzahl Bewertungen",
         "amenities_label": "Hauptausstattung (z.B. Balkon, Garten, Parkplatz, WLAN)",
         "submit": "💰 Mein Potenzial entdecken →", "your_score": "IHR SCORE", "beats": "besser als",
-        "breakdown": "SCORE-AUFSCHLUSSELUNG",
-        "total": "Inserate gesamt", "median": "Medianpreis", "avg": "Bewertungen", "top": "Top Score",
-        "spinner_market": "Marktdaten werden analysiert...",
-        "spinner_listing": "Ihr Inserat wird verglichen...",
-        "toast_market": "✓ Analyse abgeschlossen!", "toast_listing": "✓ Ihr Inserat wurde analysiert!",
-        "night": "/Nacht",
+        "breakdown": "SCORE-AUFSCHLUSSELUNG", "total": "Inserate gesamt", "median": "Medianpreis",
+        "avg": "Bewertungen", "top": "Top Score",
+        "spinner_market": "Marktdaten werden analysiert...", "spinner_listing": "Ihr Inserat wird verglichen...",
+        "toast_market": "✓ Analyse abgeschlossen!", "toast_listing": "✓ Ihr Inserat wurde analysiert!", "night": "/Nacht",
     },
 }
 
@@ -982,8 +602,7 @@ def run_streamlit():
         page_title="BerlinHostAIQ — Competitive Intelligence for Airbnb Hosts",
         page_icon="🏠", layout="wide", initial_sidebar_state="expanded"
     )
-    
-    # Initialize language in session state
+
     if "language" not in st.session_state:
         st.session_state.language = "EN"
 
@@ -1003,12 +622,11 @@ def run_streamlit():
         .hero-title { font-family:'Space Mono',monospace; font-size:2.4rem; font-weight:700; color:var(--white); letter-spacing:-0.02em; margin:0; line-height:1.1; }
         .hero-title span { color:var(--cyan); }
         .hero-subtitle { font-size:0.95rem; color:var(--muted); margin-top:0.5rem; }
-        .hero-tag { display:inline-block; background:rgba(0,212,255,0.1); border:1px solid rgba(0,212,255,0.3); color:var(--cyan); font-size:0.7rem; font-family:'Space Mono',monospace; padding:3px 10px; border-radius:20px; margin-right:6px; }
         .kpi-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:1rem; margin-bottom:2rem; }
         .kpi-card { background:var(--bg-card); border:1px solid var(--border); border-radius:12px; padding:1.2rem 1.5rem; position:relative; overflow:hidden; }
         .kpi-card::before { content:''; position:absolute; top:0; left:0; right:0; height:2px; background:linear-gradient(90deg,var(--cyan),transparent); }
         .kpi-label { font-size:0.72rem; color:var(--muted); text-transform:uppercase; letter-spacing:0.1em; font-family:'Space Mono',monospace; margin-bottom:0.4rem; }
-        .kpi-value { font-size:1.6rem; font-weight:600; color:var(--white); line-height:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+        .kpi-value { font-size:1.6rem; font-weight:600; color:var(--white); line-height:1; }
         .kpi-value.cyan { color:var(--cyan); }
         .kpi-value.gold { color:var(--gold); }
         .section-header { font-family:'Space Mono',monospace; font-size:0.8rem; font-weight:700; color:var(--cyan); letter-spacing:0.12em; text-transform:uppercase; margin:2rem 0 1rem; display:flex; align-items:center; gap:10px; }
@@ -1040,8 +658,7 @@ def run_streamlit():
             st.session_state.language = new_lang
             st.rerun()
         T = LANG[st.session_state.language]
-    
-    # Render hero section with current language
+
     T_hero = LANG[st.session_state.language]
     st.markdown(f"""
     <div class="hero-header">
@@ -1064,8 +681,12 @@ def run_streamlit():
 
         neighbourhoods = ["All"] + sorted(df["neighbourhood_group"].dropna().unique().tolist())
         selected_neighbourhood = st.selectbox(T["neighbourhood"], neighbourhoods)
+
+        # FIX 1: default room type → "Entire home/apt"
         room_types = ["All"] + sorted(df["room_type"].dropna().unique().tolist())
-        selected_room_type = st.selectbox(T["room_type"], room_types)
+        default_rt_index = room_types.index("Entire home/apt") if "Entire home/apt" in room_types else 0
+        selected_room_type = st.selectbox(T["room_type"], room_types, index=default_rt_index)
+
         top_n = st.slider(T["top_n"], min_value=5, max_value=50, value=10)
 
         _nb_txt = selected_neighbourhood if selected_neighbourhood != 'All' else 'All Berlin'
@@ -1106,43 +727,45 @@ def run_streamlit():
     _kpi_avg = f"{filtered['number_of_reviews'].mean():.0f}"
     _kpi_top = f"{filtered['ranking_score'].max():.3f}"
     _kpi_night = T['night']
-    _kpi_total_lbl = T['total']
-    _kpi_med_lbl = T['median']
-    _kpi_avg_lbl = T['avg']
-    _kpi_top_lbl = T['top']
     st.markdown(f"""
     <div class="kpi-grid">
-        <div class="kpi-card">
-            <div class="kpi-label">{_kpi_total_lbl}</div>
-            <div class="kpi-value cyan">{_kpi_total}</div>
-        </div>
-        <div class="kpi-card">
-            <div class="kpi-label">{_kpi_med_lbl}</div>
-            <div class="kpi-value">{_kpi_med}<span style="font-size:0.9rem;color:#8899AA">{_kpi_night}</span></div>
-        </div>
-        <div class="kpi-card">
-            <div class="kpi-label">{_kpi_avg_lbl}</div>
-            <div class="kpi-value">{_kpi_avg}</div>
-        </div>
-        <div class="kpi-card">
-            <div class="kpi-label">{_kpi_top_lbl}</div>
-            <div class="kpi-value gold">{_kpi_top}</div>
-        </div>
+        <div class="kpi-card"><div class="kpi-label">{T['total']}</div><div class="kpi-value cyan">{_kpi_total}</div></div>
+        <div class="kpi-card"><div class="kpi-label">{T['median']}</div><div class="kpi-value">{_kpi_med}<span style="font-size:0.9rem;color:#8899AA">{_kpi_night}</span></div></div>
+        <div class="kpi-card"><div class="kpi-label">{T['avg']}</div><div class="kpi-value">{_kpi_avg}</div></div>
+        <div class="kpi-card"><div class="kpi-label">{T['top']}</div><div class="kpi-value gold">{_kpi_top}</div></div>
     </div>
     """, unsafe_allow_html=True)
 
     st.markdown(f'<div class="section-header">{T["rankings"]}</div>', unsafe_allow_html=True)
+
+    # FIX 2: rename columns and format price/score cleanly
     display_cols = [c for c in ["name", "neighbourhood_group", "room_type", "price", "number_of_reviews", "ranking_score"] if c in ranked_df.columns]
+    _tbl = ranked_df[display_cols].head(top_n).reset_index(drop=True)
+    _tbl.index = _tbl.index + 1
+    _tbl = _tbl.rename(columns={
+        "name": "Listing",
+        "neighbourhood_group": "Neighbourhood",
+        "room_type": "Room Type",
+        "price": "Price (€)",
+        "number_of_reviews": "Reviews",
+        "ranking_score": "Score"
+    })
+    _tbl["Price (€)"] = _tbl["Price (€)"].apply(lambda x: f"€{int(x)}")
+
     def _color_score(val):
-        if val >= 0.6: return 'color: #00D4FF; font-weight:700'
-        elif val >= 0.4: return 'color: #FFD700; font-weight:700'
-        return 'color: #FF6B6B; font-weight:700'
+        try:
+            v = float(val)
+            if v >= 0.6: return 'color: #00D4FF; font-weight:700'
+            elif v >= 0.4: return 'color: #FFD700; font-weight:700'
+            return 'color: #FF6B6B; font-weight:700'
+        except:
+            return ''
+
     def _hl_top(row):
         style = 'background-color:rgba(0,212,255,0.08);border-left:3px solid #00D4FF' if row.name == 1 else ''
         return [style] * len(row)
-    _tbl = ranked_df[display_cols].head(top_n).reset_index(drop=True)
-    _tbl.index = _tbl.index + 1
-    _styled = _tbl.style.applymap(_color_score, subset=['ranking_score']).apply(_hl_top, axis=1)
+
+    _styled = _tbl.style.applymap(_color_score, subset=['Score']).apply(_hl_top, axis=1)
     st.dataframe(_styled, use_container_width=True, height=400)
     st.caption(T["caption"])
 
@@ -1151,7 +774,6 @@ def run_streamlit():
     try:
         import plotly.express as px
         _sc_df = ranked_df[display_cols].head(min(300, len(ranked_df))).copy()
-        _sc_df['rank'] = range(1, len(_sc_df)+1)
         _name_c = 'name' if 'name' in _sc_df.columns else _sc_df.columns[0]
         _fig_sc = px.scatter(
             _sc_df, x='price', y='ranking_score',
@@ -1174,23 +796,15 @@ def run_streamlit():
     except Exception as _e:
         st.caption(f'Scatter unavailable: {_e}')
 
-    # Review Intelligence Section
+    # Review Intelligence
     st.markdown('<div class="section-header">⭐ Review Intelligence</div>', unsafe_allow_html=True)
     try:
         tier_stats, df_review, top_perf, tier_counts = analyze_review_intelligence(filtered)
-        
         if tier_stats is not None:
-            # Host Tier Distribution
             col_r1, col_r2 = st.columns([1, 2])
-            
             with col_r1:
                 st.markdown('**Host Tiers**')
-                tier_colors = {
-                    "Bestseller 🌟": "#FFD700",
-                    "Established ⭐": "#00D4FF",
-                    "Rising Star 📈": "#90EE90",
-                    "New Host 🆕": "#FF6B6B"
-                }
+                tier_colors = {"Bestseller 🌟": "#FFD700", "Established ⭐": "#00D4FF", "Rising Star 📈": "#90EE90", "New Host 🆕": "#FF6B6B"}
                 for tier_name, count in tier_counts.items():
                     color = tier_colors.get(tier_name, "#8899AA")
                     pct = round((count / tier_counts.sum()) * 100, 1)
@@ -1200,15 +814,11 @@ def run_streamlit():
                         <p style="color:#8899AA; font-size:0.75rem; margin:0;">{int(count)} hosts ({pct}%)</p>
                     </div>
                     """, unsafe_allow_html=True)
-            
             with col_r2:
                 st.markdown('**Key Insights**')
-                
-                # Calculate insights
                 avg_all = filtered['number_of_reviews'].mean()
                 bestsellers = df_review[df_review['host_tier'] == "Bestseller 🌟"]
                 new_hosts = df_review[df_review['host_tier'] == "New Host 🆕"]
-                
                 if not bestsellers.empty:
                     avg_bestseller = bestsellers['number_of_reviews'].mean()
                     median_price_bs = bestsellers['price'].median()
@@ -1219,7 +829,6 @@ def run_streamlit():
                         <p style="color:#8899AA; font-size:0.75rem; margin:0;">+{int(avg_bestseller - avg_all)} more reviews than average</p>
                     </div>
                     """, unsafe_allow_html=True)
-                
                 if not new_hosts.empty:
                     ramp_up = new_hosts['reviews_per_month'].mean()
                     st.markdown(f"""
@@ -1233,7 +842,6 @@ def run_streamlit():
         st.caption(f'Review intelligence unavailable: {e}')
 
     col_map, col_chart = st.columns([3, 2])
-
     with col_map:
         st.markdown(f'<div class="section-header">{T["map_title"]}</div>', unsafe_allow_html=True)
         try:
@@ -1322,40 +930,48 @@ def run_streamlit():
     if submitted:
         with st.spinner(T["spinner_listing"]):
             comp_df = compute_ranking(df, host_neighbourhood if host_neighbourhood != "All" else None)
-            nb_median = comp_df["price"].median()
-            nb_listings = len(comp_df)
+
+            # FIX 6: filter comp_df by room type for fair price comparison
+            comp_df_rt = comp_df.copy()
+            if selected_room_type != "All" and "room_type" in comp_df_rt.columns:
+                rt_filtered = comp_df_rt[comp_df_rt["room_type"] == selected_room_type]
+                if not rt_filtered.empty:
+                    comp_df_rt = rt_filtered
+
+            nb_median = comp_df_rt["price"].median()
+            nb_listings = len(comp_df_rt)
             price_score = round(1 - min(host_price / (nb_median * 2), 1), 3)
-            max_reviews = comp_df["number_of_reviews"].max()
+            max_reviews = comp_df_rt["number_of_reviews"].max()
             review_score = round(host_reviews / max_reviews if max_reviews > 0 else 0, 3)
             demand_score = round(nb_listings / df["neighbourhood_group"].value_counts().max(), 3)
             my_score = round(price_score * 0.4 + review_score * 0.4 + demand_score * 0.2, 3)
-            percentile = round((comp_df["ranking_score"] < my_score).mean() * 100, 1)
+            percentile = round((comp_df_rt["ranking_score"] < my_score).mean() * 100, 1)
 
-            # Create synthetic selected_listing from form inputs
             selected_listing = pd.Series({
                 'price': host_price,
                 'number_of_reviews': host_reviews,
-                'reviews_per_month': comp_df['reviews_per_month'].mean() * (host_reviews / comp_df['number_of_reviews'].mean()) if comp_df['number_of_reviews'].mean() > 0 else 0.5,
-                'availability_365': 200,  # Default estimate
-                'number_of_reviews_ltm': int(host_reviews * 0.4),  # Estimate
-                'last_review': pd.Timestamp.now() - pd.Timedelta(days=15),  # Recent estimate
+                'reviews_per_month': comp_df_rt['reviews_per_month'].mean() * (host_reviews / comp_df_rt['number_of_reviews'].mean()) if comp_df_rt['number_of_reviews'].mean() > 0 else 0.5,
+                'availability_365': 200,
+                'number_of_reviews_ltm': int(host_reviews * 0.4),
+                'last_review': pd.Timestamp.now() - pd.Timedelta(days=15),
                 'room_type': selected_room_type,
                 'neighbourhood': host_neighbourhood,
                 'name': 'Your Listing'
             })
 
-            # Get price recommendation
-            recommended_mid, recommended_low, recommended_high = recommend_optimal_price(host_price, comp_df)
-            
-            # Get top 3 competitors (pass the ranked comp_df)
-            competitors = get_top_competitors(host_price, host_neighbourhood, selected_room_type, df, comp_df)
+            # FIX 6: pass selected_room_type to recommend_optimal_price
+            recommended_mid, recommended_low, recommended_high = recommend_optimal_price(
+                host_price, comp_df_rt, host_room_type=selected_room_type
+            )
 
-            # Save to session state for later use
+            # FIX 3: pass room type to get_top_competitors
+            competitors = get_top_competitors(host_price, host_neighbourhood, selected_room_type, df, comp_df_rt)
+
             st.session_state.revenue_impact = calculate_revenue_impact(
                 host_price,
                 (recommended_mid if recommended_mid else host_price),
                 selected_listing['reviews_per_month'],
-                comp_df['reviews_per_month'].mean(),
+                comp_df_rt['reviews_per_month'].mean(),
                 (365 - selected_listing['availability_365']) / 365 * 100
             )
             st.session_state.revenue_impact_ready = True
@@ -1369,63 +985,49 @@ Generate 5 specific recommendations: 1) Price positioning vs €{nb_median:.0f} 
             response = llm.invoke([HumanMessage(content=personal_prompt)])
             personal_insights = response.content
 
-        # 🎯 EXECUTIVE SUMMARY — THE MOST IMPORTANT SECTION
         if 'revenue_impact_ready' in st.session_state and st.session_state.revenue_impact_ready:
             revenue_impact = st.session_state.revenue_impact
-            
             st.markdown('<div class="section-header">📊 Executive Summary — Your Revenue Opportunity</div>', unsafe_allow_html=True)
             try:
-                # Create 3-column summary
                 summ_col1, summ_col2, summ_col3 = st.columns(3)
-                
                 with summ_col1:
-                    # Current Status
                     st.markdown(f"""
                     <div style="background:#132140; border:2px solid #8899AA; border-radius:8px; padding:1.2rem; text-align:center;">
-                        <p style="color:#8899AA; font-size:0.7rem; text-transform:uppercase; margin:0 0 0.5rem; letter-spacing:0.1em;"><b>Current Annual Revenue</b></p>
+                        <p style="color:#8899AA; font-size:0.7rem; text-transform:uppercase; margin:0 0 0.5rem;"><b>Current Annual Revenue</b></p>
                         <p style="color:#00D4FF; font-size:2rem; font-weight:700; margin:0;">€{(host_price * max(selected_listing['reviews_per_month'], 1) * 30 * 12):.0f}</p>
-                        <p style="color:#C8D8E8; font-size:0.75rem; margin:0.5rem 0;">At {host_price}€/night</p>
+                        <p style="color:#C8D8E8; font-size:0.75rem; margin:0.5rem 0;">At €{host_price}/night</p>
                     </div>
                     """, unsafe_allow_html=True)
-                
                 with summ_col2:
-                    # Revenue Impact (loss or gain)
                     monthly_impact = revenue_impact['monthly_total_potential']
                     annual_impact = revenue_impact['annual_total_potential']
                     impact_sign = "+" if monthly_impact > 0 else ""
                     impact_color = "#90EE90" if monthly_impact > 0 else "#FF6B6B"
-                    
                     st.markdown(f"""
                     <div style="background:#132140; border:2px solid {impact_color}; border-radius:8px; padding:1.2rem; text-align:center;">
-                        <p style="color:{impact_color}; font-size:0.7rem; text-transform:uppercase; margin:0 0 0.5rem; letter-spacing:0.1em;"><b>💰 Monthly Opportunity</b></p>
+                        <p style="color:{impact_color}; font-size:0.7rem; text-transform:uppercase; margin:0 0 0.5rem;"><b>💰 Monthly Opportunity</b></p>
                         <p style="color:{impact_color}; font-size:2rem; font-weight:700; margin:0;">{impact_sign}€{abs(monthly_impact):.0f}</p>
-                        <p style="color:#C8D8E8; font-size:0.75rem; margin:0.5rem 0;">= €{impact_sign}{abs(annual_impact):.0f}/year</p>
+                        <p style="color:#C8D8E8; font-size:0.75rem; margin:0.5rem 0;">= {impact_sign}€{abs(annual_impact):.0f}/year</p>
                     </div>
                     """, unsafe_allow_html=True)
-                
                 with summ_col3:
-                    # Potential Revenue if Optimized
-                    potential_annual = (recommended_mid * (selected_listing['reviews_per_month'] * 1.5) * 30 * 12)
-                    
+                    potential_annual = (recommended_mid * (selected_listing['reviews_per_month'] * 1.5) * 30 * 12) if recommended_mid else host_price * selected_listing['reviews_per_month'] * 30 * 12
                     st.markdown(f"""
                     <div style="background:#132140; border:2px solid #FFD700; border-radius:8px; padding:1.2rem; text-align:center;">
-                        <p style="color:#FFD700; font-size:0.7rem; text-transform:uppercase; margin:0 0 0.5rem; letter-spacing:0.1em;"><b>🎯 Optimized Annual Revenue</b></p>
+                        <p style="color:#FFD700; font-size:0.7rem; text-transform:uppercase; margin:0 0 0.5rem;"><b>🎯 Optimized Annual Revenue</b></p>
                         <p style="color:#FFD700; font-size:2rem; font-weight:700; margin:0;">€{potential_annual:.0f}</p>
-                        <p style="color:#C8D8E8; font-size:0.75rem; margin:0.5rem 0;">+{((potential_annual / (host_price * max(selected_listing['reviews_per_month'], 1) * 30 * 12) - 1) * 100):.0f}% upside</p>
+                        <p style="color:#C8D8E8; font-size:0.75rem; margin:0.5rem 0;">+{((potential_annual / max(host_price * max(selected_listing['reviews_per_month'], 1) * 30 * 12, 1) - 1) * 100):.0f}% upside</p>
                     </div>
                     """, unsafe_allow_html=True)
-                
-                # Main Insight Card
                 if abs(monthly_impact) > 100:
                     insight_type = "⚠️ OPPORTUNITY" if monthly_impact > 0 else "🚨 LOSING MONEY"
                     insight_color = "#90EE90" if monthly_impact > 0 else "#FF6B6B"
-                    
                     st.markdown(f"""
                     <div style="background:{insight_color}11; border:1px solid {insight_color}; border-radius:8px; padding:1.5rem; margin-top:1rem;">
                         <p style="color:{insight_color}; font-size:1.1rem; font-weight:700; margin:0 0 0.5rem;">{insight_type}</p>
                         <p style="color:#C8D8E8; font-size:0.95rem; margin:0;">
-                            You're currently <b>leaving €{abs(monthly_impact):.0f}/month on the table</b> due to suboptimal pricing 
-                            and positioning. By implementing the recommendations below, you could earn 
+                            You're currently <b>leaving €{abs(monthly_impact):.0f}/month on the table</b> due to suboptimal pricing
+                            and positioning. By implementing the recommendations below, you could earn
                             <span style="color:{insight_color}; font-weight:700;">+€{abs(annual_impact):.0f}/year</span>.
                         </p>
                     </div>
@@ -1433,14 +1035,10 @@ Generate 5 specific recommendations: 1) Price positioning vs €{nb_median:.0f} 
             except Exception as e:
                 st.error(f"Executive summary error: {e}")
 
-        # 📋 ACTIONABLE REPORT BREAKDOWN (SaaS Style)
         st.markdown('<div class="section-header">📋 Your Action Plan</div>', unsafe_allow_html=True)
         try:
             report_breakdown = create_report_breakdown_saas(
-                revenue_impact,
-                recommended_mid,
-                host_price,
-                host_reviews,
+                revenue_impact, recommended_mid, host_price, host_reviews,
                 recommended_positioning if 'recommended_positioning' in locals() else "Strategic Positioning",
                 positioning_analysis['market_stats'] if 'positioning_analysis' in locals() else {"median_activity": 0.7}
             )
@@ -1448,150 +1046,69 @@ Generate 5 specific recommendations: 1) Price positioning vs €{nb_median:.0f} 
         except Exception as e:
             st.caption(f"Actionable report unavailable: {e}")
 
-        # Price Recommendation Section
         if recommended_mid is not None:
             st.markdown('<div class="section-header">💰 Price Recommendation Engine</div>', unsafe_allow_html=True)
             price_col1, price_col2, price_col3, price_col4 = st.columns(4)
             with price_col1:
-                st.markdown(f"""
-                <div style="background:#132140; border:1px solid rgba(255,100,100,0.3); border-radius:8px; padding:1rem; text-align:center;">
+                st.markdown(f"""<div style="background:#132140; border:1px solid rgba(255,100,100,0.3); border-radius:8px; padding:1rem; text-align:center;">
                     <p style="color:#8899AA; font-size:0.7rem; margin:0 0 0.4rem;">YOUR PRICE</p>
-                    <p style="color:#FF6B6B; font-size:2rem; font-weight:700; margin:0;">€{int(host_price)}</p>
-                </div>
-                """, unsafe_allow_html=True)
+                    <p style="color:#FF6B6B; font-size:2rem; font-weight:700; margin:0;">€{int(host_price)}</p></div>""", unsafe_allow_html=True)
             with price_col2:
-                st.markdown(f"""
-                <div style="background:#132140; border:1px solid rgba(0,212,255,0.3); border-radius:8px; padding:1rem; text-align:center;">
+                st.markdown(f"""<div style="background:#132140; border:1px solid rgba(0,212,255,0.3); border-radius:8px; padding:1rem; text-align:center;">
                     <p style="color:#8899AA; font-size:0.7rem; margin:0 0 0.4rem;">RECOMMENDED</p>
-                    <p style="color:#00D4FF; font-size:2rem; font-weight:700; margin:0;">€{int(recommended_mid)}</p>
-                </div>
-                """, unsafe_allow_html=True)
+                    <p style="color:#00D4FF; font-size:2rem; font-weight:700; margin:0;">€{int(recommended_mid)}</p></div>""", unsafe_allow_html=True)
             with price_col3:
-                st.markdown(f"""
-                <div style="background:#132140; border:1px solid rgba(100,200,100,0.3); border-radius:8px; padding:1rem; text-align:center;">
+                st.markdown(f"""<div style="background:#132140; border:1px solid rgba(100,200,100,0.3); border-radius:8px; padding:1rem; text-align:center;">
                     <p style="color:#8899AA; font-size:0.7rem; margin:0 0 0.4rem;">SWEET SPOT RANGE</p>
-                    <p style="color:#90EE90; font-size:1.3rem; font-weight:700; margin:0;">€{int(recommended_low)}-€{int(recommended_high)}</p>
-                </div>
-                """, unsafe_allow_html=True)
+                    <p style="color:#90EE90; font-size:1.3rem; font-weight:700; margin:0;">€{int(recommended_low)}-€{int(recommended_high)}</p></div>""", unsafe_allow_html=True)
             with price_col4:
-                st.markdown(f"""
-                <div style="background:#132140; border:1px solid rgba(255,215,0,0.3); border-radius:8px; padding:1rem; text-align:center;">
+                st.markdown(f"""<div style="background:#132140; border:1px solid rgba(255,215,0,0.3); border-radius:8px; padding:1rem; text-align:center;">
                     <p style="color:#8899AA; font-size:0.7rem; margin:0 0 0.4rem;">MARKET MEDIAN</p>
-                    <p style="color:#FFD700; font-size:2rem; font-weight:700; margin:0;">€{int(nb_median)}</p>
-                </div>
-                """, unsafe_allow_html=True)
-            
-            # Price positioning assessment
+                    <p style="color:#FFD700; font-size:2rem; font-weight:700; margin:0;">€{int(nb_median)}</p></div>""", unsafe_allow_html=True)
             st.write("")
-            
             if host_price < recommended_low:
                 st.info(f"💡 **Opportunity**: Your price (€{int(host_price)}) is below the optimal range (€{int(recommended_low)}-€{int(recommended_high)}). Consider increasing to match demand.")
             elif host_price > recommended_high:
                 st.warning(f"⚠️ **Risk**: Your price (€{int(host_price)}) exceeds the sweet spot (€{int(recommended_low)}-€{int(recommended_high)}). You may be pricing yourself out of competition.")
             else:
                 st.success(f"✅ **Strong**: Your price (€{int(host_price)}) is well-positioned in the optimal range (€{int(recommended_low)}-€{int(recommended_high)}).")
-            
-            # PDF Export
-            st.write("")
-            col_pdf1, col_pdf2, col_pdf3 = st.columns([1, 2, 1])
-            with col_pdf2:
-                if st.button("📥 Download Full PDF Report", use_container_width=True):
-                    try:
-                        pdf_file = generate_pdf_report(
-                            "MyListing",
-                            selected_listing,
-                            competitors,
-                            revenue_impact,
-                            positioning_analysis['market_stats'] if 'positioning_analysis' in locals() else {},
-                            recommended_positioning if 'recommended_positioning' in locals() else "Strategic"
-                        )
-                        if pdf_file:
-                            with open(pdf_file, "rb") as f:
-                                st.download_button(
-                                    label="💾 Save Report",
-                                    data=f.read(),
-                                    file_name=pdf_file,
-                                    mime="application/pdf"
-                                )
-                            st.success(f"✅ Report ready: {pdf_file}")
-                        else:
-                            st.info("📝 PDF export requires reportlab library. Contact support.")
-                    except Exception as e:
-                        st.error(f"PDF generation failed: {e}")
 
-        # 📨 PRICE ALERTS & NOTIFICATIONS
-        st.markdown('<div class="section-header">🔔 Smart Alerts & Notifications</div>', unsafe_allow_html=True)
+        # FIX 5: Smart Alerts — removed "Weekly Alerts coming soon" block
+        st.markdown('<div class="section-header">🔔 Smart Alerts</div>', unsafe_allow_html=True)
         try:
             alerts = []
-            
-            # Alert 1: Price positioning
-            price_diff_pct = abs(host_price - recommended_mid) / recommended_mid * 100
+            price_diff_pct = abs(host_price - recommended_mid) / recommended_mid * 100 if recommended_mid else 0
             if price_diff_pct > 15:
                 if host_price < recommended_mid:
-                    alerts.append({
-                        "type": "opportunity",
-                        "title": "💰 Pricing Opportunity",
-                        "message": f"You're underpricing by {price_diff_pct:.0f}%. Competitors at €{int(recommended_mid)} average {comp_df['reviews_per_month'].mean():.2f} reviews/month."
-                    })
+                    alerts.append({"type": "opportunity", "title": "💰 Pricing Opportunity",
+                        "message": f"You're underpricing by {price_diff_pct:.0f}%. Comparable listings at €{int(recommended_mid)} average {comp_df_rt['reviews_per_month'].mean():.2f} reviews/month."})
                 else:
-                    alerts.append({
-                        "type": "warning",
-                        "title": "⚠️ Price Risk",
-                        "message": f"You're overpricing by {price_diff_pct:.0f}%. Consider €{int(recommended_mid)}-€{int(recommended_low)} to stay competitive."
-                    })
-            
-            # Alert 2: Review velocity
-            if selected_listing['reviews_per_month'] < comp_df['reviews_per_month'].median() * 0.5:
-                alerts.append({
-                    "type": "info",
-                    "title": "📊 Low Booking Activity",
-                    "message": f"Your booking rate ({selected_listing['reviews_per_month']:.2f}/month) is below market median ({comp_df['reviews_per_month'].median():.2f}/month). Try photos update or availability changes."
-                })
-            
-            # Alert 3: Large gap in reviews
-            if host_reviews < comp_df['number_of_reviews'].median() * 0.3:
-                alerts.append({
-                    "type": "info",
-                    "title": "🔄 Build Credibility",
-                    "message": f"Consider promotional pricing initially to build reviews. Current: {host_reviews} vs median: {int(comp_df['number_of_reviews'].median())}"
-                })
-            
-            # Display alerts
+                    alerts.append({"type": "warning", "title": "⚠️ Price Risk",
+                        "message": f"You're overpricing by {price_diff_pct:.0f}%. Consider €{int(recommended_low)}-€{int(recommended_high)} to stay competitive."})
+            if selected_listing['reviews_per_month'] < comp_df_rt['reviews_per_month'].median() * 0.5:
+                alerts.append({"type": "info", "title": "📊 Low Booking Activity",
+                    "message": f"Your booking rate ({selected_listing['reviews_per_month']:.2f}/month) is below market median ({comp_df_rt['reviews_per_month'].median():.2f}/month). Try updating photos or opening more availability."})
+            if host_reviews < comp_df_rt['number_of_reviews'].median() * 0.3:
+                alerts.append({"type": "info", "title": "🔄 Build Credibility",
+                    "message": f"Consider promotional pricing to build reviews. Current: {host_reviews} vs median: {int(comp_df_rt['number_of_reviews'].median())}"})
             if alerts:
                 for alert in alerts:
-                    if alert["type"] == "opportunity":
-                        st.success(f"**{alert['title']}**: {alert['message']}")
-                    elif alert["type"] == "warning":
-                        st.warning(f"**{alert['title']}**: {alert['message']}")
-                    else:
-                        st.info(f"**{alert['title']}**: {alert['message']}")
+                    if alert["type"] == "opportunity": st.success(f"**{alert['title']}**: {alert['message']}")
+                    elif alert["type"] == "warning": st.warning(f"**{alert['title']}**: {alert['message']}")
+                    else: st.info(f"**{alert['title']}**: {alert['message']}")
             else:
                 st.success("✅ **Perfect!** Your listing is well-positioned. Monitor weekly for market changes.")
-            
-            # Add to session state for weekly alert system
-            st.markdown("""
-            <div style="background:#132140; border:1px solid rgba(0,212,255,0.2); border-radius:8px; padding:1rem; margin-top:1rem;">
-                <p style="color:#8899AA; font-size:0.75rem; text-transform:uppercase; letter-spacing:0.1em; margin:0 0 0.5rem;"><b>💌 Weekly Alerts</b></p>
-                <p style="color:#C8D8E8; font-size:0.85rem; margin:0;">Enable email notifications for price changes, competitors moving, and booking velocity alerts (coming soon).</p>
-            </div>
-            """, unsafe_allow_html=True)
         except Exception as e:
             st.caption(f"Alerts unavailable: {e}")
 
-        # Positioning Strategy Section
+        # Positioning Strategy
         st.markdown('<div class="section-header">🎯 Positioning Strategy</div>', unsafe_allow_html=True)
         try:
             positioning_analysis = analyze_positioning_opportunity(df, host_neighbourhood, selected_room_type)
-            
             if positioning_analysis:
-                # Get recommendation
                 recommended_positioning, recommendation_reason = get_positioning_recommendation(
-                    host_price, 
-                    selected_listing['reviews_per_month'],
-                    positioning_analysis['market_stats']
+                    host_price, selected_listing['reviews_per_month'], positioning_analysis['market_stats']
                 )
-                
-                # Show recommended positioning
                 st.markdown(f"""
                 <div style="background:rgba(0,212,255,0.1); border:2px solid #00D4FF; border-radius:8px; padding:1.2rem;">
                     <p style="color:#8899AA; font-size:0.75rem; margin:0 0 0.5rem; text-transform:uppercase;"><b>Market Recommendation</b></p>
@@ -1599,105 +1116,10 @@ Generate 5 specific recommendations: 1) Price positioning vs €{nb_median:.0f} 
                     <p style="color:#C8D8E8; font-size:0.9rem; margin:0;">{recommendation_reason}</p>
                 </div>
                 """, unsafe_allow_html=True)
-                
-                # Positioning selector
-                st.write("")
-                positioning_choice = st.radio(
-                    "**Or select your preferred positioning:**",
-                    list(positioning_analysis['positionings'].keys()),
-                    index=0,
-                    horizontal=False,
-                    label_visibility="visible"
-                )
-                
-                if positioning_choice:
-                    positioning_data = positioning_analysis['positionings'][positioning_choice]
-                    market_stats = positioning_analysis['market_stats']
-                    
-                    # Show alignment check
-                    st.markdown(f"<div class='section-header' style='margin-top:1rem;'>📊 {positioning_choice} — Market Benchmark</div>", unsafe_allow_html=True)
-                    
-                    # Create benchmark comparison
-                    bench_col1, bench_col2, bench_col3, bench_col4 = st.columns(4)
-                    
-                    with bench_col1:
-                        price_low, price_high = positioning_data['price_range']
-                        is_aligned = price_low <= host_price <= price_high
-                        alignment_color = "#90EE90" if is_aligned else "#FF6B6B"
-                        st.markdown(f"""
-                        <div style="background:#132140; border:1px solid {alignment_color}; border-radius:8px; padding:0.8rem; text-align:center;">
-                            <p style="color:#8899AA; font-size:0.65rem; margin:0 0 0.3rem;">PRICE ALIGNMENT</p>
-                            <p style="color:{alignment_color}; font-size:1.4rem; font-weight:700; margin:0;">{'✅' if is_aligned else '❌'}</p>
-                            <p style="color:#C8D8E8; font-size:0.75rem; margin:0.3rem 0;">€{price_low:.0f}-€{price_high:.0f}</p>
-                            <p style="color:#8899AA; font-size:0.7rem; margin:0;">Your: €{host_price:.0f}</p>
-                        </div>
-                        """, unsafe_allow_html=True)
-                    
-                    with bench_col2:
-                        avg_price_market = market_stats['avg_price']
-                        st.markdown(f"""
-                        <div style="background:#132140; border:1px solid rgba(0,212,255,0.2); border-radius:8px; padding:0.8rem; text-align:center;">
-                            <p style="color:#8899AA; font-size:0.65rem; margin:0 0 0.3rem;">MARKET AVG</p>
-                            <p style="color:#00D4FF; font-size:1.4rem; font-weight:700; margin:0;">€{avg_price_market:.0f}</p>
-                            <p style="color:#C8D8E8; font-size:0.75rem; margin:0.3rem 0;">{market_stats['total_listings']} listings</p>
-                            <p style="color:#8899AA; font-size:0.7rem; margin:0;">in your segment</p>
-                        </div>
-                        """, unsafe_allow_html=True)
-                    
-                    with bench_col3:
-                        target_activity = positioning_data['ideal_activity']
-                        your_activity = selected_listing['reviews_per_month']
-                        activity_aligned = your_activity >= (target_activity * 0.8)
-                        activity_color = "#90EE90" if activity_aligned else "#FFD700"
-                        st.markdown(f"""
-                        <div style="background:#132140; border:1px solid {activity_color}; border-radius:8px; padding:0.8rem; text-align:center;">
-                            <p style="color:#8899AA; font-size:0.65rem; margin:0 0 0.3rem;">ACTIVITY TARGET</p>
-                            <p style="color:{activity_color}; font-size:1.4rem; font-weight:700; margin:0;">{your_activity:.2f}</p>
-                            <p style="color:#C8D8E8; font-size:0.75rem; margin:0.3rem 0;">reviews/month</p>
-                            <p style="color:#8899AA; font-size:0.7rem; margin:0;">Target: {target_activity:.2f}</p>
-                        </div>
-                        """, unsafe_allow_html=True)
-                    
-                    with bench_col4:
-                        avg_reviews_market = market_stats['avg_reviews']
-                        your_reviews = host_reviews
-                        st.markdown(f"""
-                        <div style="background:#132140; border:1px solid rgba(0,212,255,0.2); border-radius:8px; padding:0.8rem; text-align:center;">
-                            <p style="color:#8899AA; font-size:0.65rem; margin:0 0 0.3rem;">TRUST SIGNAL</p>
-                            <p style="color:#00D4FF; font-size:1.4rem; font-weight:700; margin:0;">{your_reviews}</p>
-                            <p style="color:#C8D8E8; font-size:0.75rem; margin:0.3rem 0;">your reviews</p>
-                            <p style="color:#8899AA; font-size:0.7rem; margin:0;">Avg: {avg_reviews_market:.0f}</p>
-                        </div>
-                        """, unsafe_allow_html=True)
-                    
-                    # Alignment insights
-                    st.write("")
-                    alignment_insights = []
-                    
-                    if is_aligned:
-                        alignment_insights.append("✅ **Price**: Your rate aligns perfectly with this positioning")
-                    else:
-                        if host_price < price_low:
-                            alignment_insights.append(f"⚠️ **Price**: You're €{price_low - host_price:.0f} below this positioning. Consider premium positioning or reduce expectations.")
-                        else:
-                            alignment_insights.append(f"⚠️ **Price**: You're €{host_price - price_high:.0f} above this positioning. Increase amenities or select luxury positioning.")
-                    
-                    if activity_aligned:
-                        alignment_insights.append("✅ **Activity**: Your booking rate meets the positioning target")
-                    else:
-                        alignment_insights.append(f"📈 **Activity**: Increase visibility — target {target_activity:.2f} reviews/month for strong positioning")
-                    
-                    if your_reviews >= market_stats['avg_reviews'] * 0.7:
-                        alignment_insights.append("✅ **Trust**: Sufficient reviews for credibility in this segment")
-                    else:
-                        alignment_insights.append(f"🔄 **Trust**: Build reviews — {int((market_stats['avg_reviews'] * 0.7) - your_reviews)} more needed for segment average")
-                    
-                    for insight in alignment_insights:
-                        st.info(insight)
         except Exception as e:
             st.caption(f"Positioning analysis unavailable: {e}")
 
-        # Top 3 Competitors Section
+        # Top 3 Competitors
         if not competitors.empty:
             st.markdown('<div class="section-header">🏆 Top 3 Direct Competitors</div>', unsafe_allow_html=True)
             for idx, comp_row in competitors.iterrows():
@@ -1706,11 +1128,15 @@ Generate 5 specific recommendations: 1) Price positioning vs €{nb_median:.0f} 
                 comp_reviews = int(comp_row.get("number_of_reviews", 0))
                 comp_score = comp_row.get("ranking_score", 0)
                 comp_neighbourhood = comp_row.get("neighbourhood_group", "N/A")
-                
+                # FIX 3: clean price diff display
                 price_diff = comp_price - host_price
-                price_indicator = f"<span style='color:#90EE90;'>+€{price_diff}</span>" if price_diff > 0 else f"<span style='color:#FF6B6B;'>€{price_diff}</span>" if price_diff < 0 else f"<span style='color:#FFD700;'>=€{price_diff}</span>"
+                if price_diff > 0:
+                    price_indicator = f"<span style='color:#90EE90;'>(+€{price_diff} vs yours)</span>"
+                elif price_diff < 0:
+                    price_indicator = f"<span style='color:#FF6B6B;'>(-€{abs(price_diff)} vs yours)</span>"
+                else:
+                    price_indicator = f"<span style='color:#FFD700;'>(same price)</span>"
                 score_color = "#00D4FF" if comp_score >= 0.6 else "#FFD700" if comp_score >= 0.4 else "#FF6B6B"
-                
                 st.markdown(f"""
                 <div style="background:#132140; border:1px solid rgba(0,212,255,0.2); border-radius:8px; padding:1rem; margin-bottom:0.8rem;">
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.5rem;">
@@ -1725,223 +1151,70 @@ Generate 5 specific recommendations: 1) Price positioning vs €{nb_median:.0f} 
                 </div>
                 """, unsafe_allow_html=True)
         else:
-            st.info("No similar competitors found. Try adjusting your filters or price range.")
+            st.info("No similar competitors found in this price range and room type.")
 
-        # Revenue Simulator
+        # Revenue Simulator — FIX 4: hide_index=True
         st.markdown('<div class="section-header">💵 Revenue Optimization Simulator</div>', unsafe_allow_html=True)
         try:
-            scenarios = calculate_revenue_scenarios(host_price, comp_df, nb_median)
-            
+            scenarios = calculate_revenue_scenarios(host_price, comp_df_rt, nb_median)
+            current = next((s for s in scenarios if s['is_current']), scenarios[2])
             col_sim1, col_sim2 = st.columns([2, 1])
-            
             with col_sim1:
-                # Scenario table
-                scenario_display = []
-                for s in scenarios:
-                    scenario_display.append({
-                        "Price": f"€{int(s['price'])}",
-                        "Monthly": f"€{int(s['monthly_revenue'])}",
-                        "Annual": f"€{int(s['annual_revenue'])}",
-                        "Occupancy": f"{s['occupancy']:.0f}%",
-                        "Position": f"#{s['rank_position']}"
-                    })
-                
-                st.dataframe(pd.DataFrame(scenario_display), use_container_width=True, height=200)
-            
+                display_scenarios = [{k: v for k, v in s.items() if k != 'is_current'} for s in scenarios]
+                st.dataframe(pd.DataFrame(display_scenarios), use_container_width=True, height=200, hide_index=True)
             with col_sim2:
-                current = [s for s in scenarios if s['is_current']][0]
                 st.markdown(f"""
                 <div style="background:#132140; border:1px solid rgba(0,212,255,0.3); border-radius:8px; padding:1rem;">
                     <p style="color:#8899AA; font-size:0.7rem; margin:0 0 0.3rem;">YOUR CURRENT SCENARIO</p>
-                    <p style="color:#00D4FF; font-size:1.8rem; font-weight:700; margin:0;">€{int(current['monthly_revenue'])}</p>
+                    <p style="color:#00D4FF; font-size:1.8rem; font-weight:700; margin:0;">{current['Monthly']}</p>
                     <p style="color:#8899AA; font-size:0.75rem; margin:0.3rem 0;">monthly revenue</p>
-                    <p style="color:#C8D8E8; font-size:0.8rem; margin:0.3rem 0;">📊 {current['occupancy']:.0f}% occupancy</p>
-                    <p style="color:#C8D8E8; font-size:0.8rem; margin:0;">🏆 Position #{current['rank_position']}</p>
+                    <p style="color:#C8D8E8; font-size:0.8rem; margin:0.3rem 0;">📊 {current['Occupancy']} occupancy</p>
+                    <p style="color:#C8D8E8; font-size:0.8rem; margin:0;">🏆 {current['Position']}</p>
                 </div>
                 """, unsafe_allow_html=True)
         except Exception as e:
             st.caption(f"Simulator unavailable: {e}")
 
-        # Key Performance Indicators (KPI) Analytics
+        # KPI
         st.markdown('<div class="section-header">📊 Key Performance Indicators</div>', unsafe_allow_html=True)
         try:
             kpi_data = calculate_kpi_metrics(selected_listing)
-            
             kpi1, kpi2, kpi3 = st.columns(3)
-            
             with kpi1:
                 occ_pct = kpi_data["occupancy_rate"]
                 occ_color = "#90EE90" if occ_pct >= 60 else "#FFD700" if occ_pct >= 40 else "#FF6B6B"
-                st.markdown(f"""
-                <div style="background:#132140; border:1px solid rgba(0,212,255,0.2); border-radius:8px; padding:0.8rem; text-align:center;">
+                st.markdown(f"""<div style="background:#132140; border:1px solid rgba(0,212,255,0.2); border-radius:8px; padding:0.8rem; text-align:center;">
                     <p style="color:#8899AA; font-size:0.65rem; margin:0 0 0.3rem;">OCCUPANCY RATE</p>
-                    <p style="color:{occ_color}; font-size:1.8rem; font-weight:700; margin:0;">{occ_pct:.1f}%</p>
-                    <p style="color:#8899AA; font-size:0.7rem; margin:0.3rem 0;">Days booked / 365</p>
-                </div>
-                """, unsafe_allow_html=True)
-            
+                    <p style="color:{occ_color}; font-size:1.8rem; font-weight:700; margin:0;">{occ_pct:.1f}%</p></div>""", unsafe_allow_html=True)
             with kpi2:
-                adr_val = kpi_data["adr"]
-                st.markdown(f"""
-                <div style="background:#132140; border:1px solid rgba(0,212,255,0.2); border-radius:8px; padding:0.8rem; text-align:center;">
+                st.markdown(f"""<div style="background:#132140; border:1px solid rgba(0,212,255,0.2); border-radius:8px; padding:0.8rem; text-align:center;">
                     <p style="color:#8899AA; font-size:0.65rem; margin:0 0 0.3rem;">ADR (Avg Daily Rate)</p>
-                    <p style="color:#00D4FF; font-size:1.8rem; font-weight:700; margin:0;">€{adr_val:.0f}</p>
-                    <p style="color:#8899AA; font-size:0.7rem; margin:0.3rem 0;">Per night</p>
-                </div>
-                """, unsafe_allow_html=True)
-            
+                    <p style="color:#00D4FF; font-size:1.8rem; font-weight:700; margin:0;">€{kpi_data['adr']:.0f}</p></div>""", unsafe_allow_html=True)
             with kpi3:
                 revpar_val = kpi_data["revpar"]
                 revpar_color = "#90EE90" if revpar_val >= 60 else "#FFD700" if revpar_val >= 30 else "#FF6B6B"
-                st.markdown(f"""
-                <div style="background:#132140; border:1px solid rgba(0,212,255,0.2); border-radius:8px; padding:0.8rem; text-align:center;">
+                st.markdown(f"""<div style="background:#132140; border:1px solid rgba(0,212,255,0.2); border-radius:8px; padding:0.8rem; text-align:center;">
                     <p style="color:#8899AA; font-size:0.65rem; margin:0 0 0.3rem;">RevPAR</p>
-                    <p style="color:{revpar_color}; font-size:1.8rem; font-weight:700; margin:0;">€{revpar_val:.0f}</p>
-                    <p style="color:#8899AA; font-size:0.7rem; margin:0.3rem 0;">Occupancy × Price</p>
-                </div>
-                """, unsafe_allow_html=True)
-            
-            kpi4, kpi5, kpi6 = st.columns(3)
-            
-            with kpi4:
-                ltm_val = kpi_data["reviews_ltm"]
-                ltm_color = "#90EE90" if ltm_val >= 15 else "#FFD700" if ltm_val >= 5 else "#FF6B6B"
-                st.markdown(f"""
-                <div style="background:#132140; border:1px solid rgba(0,212,255,0.2); border-radius:8px; padding:0.8rem; text-align:center;">
-                    <p style="color:#8899AA; font-size:0.65rem; margin:0 0 0.3rem;">REVIEWS (Last 12 Mo)</p>
-                    <p style="color:{ltm_color}; font-size:1.8rem; font-weight:700; margin:0;">{ltm_val}</p>
-                    <p style="color:#8899AA; font-size:0.7rem; margin:0.3rem 0;">Recent bookings</p>
-                </div>
-                """, unsafe_allow_html=True)
-            
-            with kpi5:
-                freq_val = kpi_data["reviews_per_month"]
-                freq_color = "#90EE90" if freq_val >= 1.0 else "#FFD700" if freq_val >= 0.3 else "#FF6B6B"
-                st.markdown(f"""
-                <div style="background:#132140; border:1px solid rgba(0,212,255,0.2); border-radius:8px; padding:0.8rem; text-align:center;">
-                    <p style="color:#8899AA; font-size:0.65rem; margin:0 0 0.3rem;">BOOKING FREQUENCY</p>
-                    <p style="color:{freq_color}; font-size:1.8rem; font-weight:700; margin:0;">{freq_val:.2f}</p>
-                    <p style="color:#8899AA; font-size:0.7rem; margin:0.3rem 0;">Reviews/month</p>
-                </div>
-                """, unsafe_allow_html=True)
-            
-            with kpi6:
-                days_val = kpi_data["days_since_last_review"]
-                if isinstance(days_val, int):
-                    days_color = "#90EE90" if days_val <= 30 else "#FFD700" if days_val <= 90 else "#FF6B6B"
-                    display_val = f"{days_val}d ago"
-                else:
-                    days_color = "#FF6B6B"
-                    display_val = "N/A"
-                st.markdown(f"""
-                <div style="background:#132140; border:1px solid rgba(0,212,255,0.2); border-radius:8px; padding:0.8rem; text-align:center;">
-                    <p style="color:#8899AA; font-size:0.65rem; margin:0 0 0.3rem;">LAST BOOKING</p>
-                    <p style="color:{days_color}; font-size:1.8rem; font-weight:700; margin:0;">{display_val}</p>
-                    <p style="color:#8899AA; font-size:0.7rem; margin:0.3rem 0;">Days since review</p>
-                </div>
-                """, unsafe_allow_html=True)
-            
-            st.info("💡 **KPI Analysis**: High occupancy + consistent bookings = strong market fit. RevPAR combines both factors for true revenue potential.")
+                    <p style="color:{revpar_color}; font-size:1.8rem; font-weight:700; margin:0;">€{revpar_val:.0f}</p></div>""", unsafe_allow_html=True)
         except Exception as e:
             st.caption(f"KPI calculation unavailable: {e}")
 
-        # Competitive Comparison
-        st.markdown('<div class="section-header">⚔️ Competitive Comparison</div>', unsafe_allow_html=True)
-        try:
-            comparison_df = create_competitive_comparison(selected_listing, competitors)
-            
-            # Display comparison table with custom styling
-            st.dataframe(
-                comparison_df.style.applymap(
-                    lambda v: "background-color: rgba(0, 212, 255, 0.15); color: #00D4FF; font-weight: 600;" if "YOUR" in str(v) else "background-color: rgba(132, 153, 170, 0.05); color: #C8D8E8;"
-                ).format({
-                    "Price (€/night)": lambda x: str(x),
-                    "Total Reviews": lambda x: str(x),
-                    "Reviews/Month": lambda x: str(x),
-                }),
-                use_container_width=True,
-                height=200
-            )
-            
-            # Key insights from comparison
-            price_vs = selected_listing['price'] - competitors['price'].median()
-            reviews_vs = selected_listing['number_of_reviews'] - competitors['number_of_reviews'].median()
-            activity_vs = selected_listing['reviews_per_month'] - competitors['reviews_per_month'].median()
-            
-            comp_insights = []
-            
-            if price_vs > 0:
-                comp_insights.append(f"💰 **Pricing**: Your price is **€{abs(price_vs):.0f} HIGHER** than median competitors (consider market positioning)")
-            else:
-                comp_insights.append(f"💰 **Pricing**: Your price is **€{abs(price_vs):.0f} LOWER** than median competitors (more competitive)")
-            
-            if reviews_vs > 0:
-                comp_insights.append(f"📊 **Experience**: You have **{int(abs(reviews_vs))} MORE reviews** than median competitors (higher trust signal)")
-            else:
-                comp_insights.append(f"📊 **Experience**: You have **{int(abs(reviews_vs))} FEWER reviews** than median competitors (growth opportunity)")
-            
-            if activity_vs > 0:
-                comp_insights.append(f"⚡ **Activity**: Your booking rate is **{abs(activity_vs):.2f} reviews/month HIGHER** than competitors (strong market fit)")
-            else:
-                comp_insights.append(f"⚡ **Activity**: Your booking rate is **{abs(activity_vs):.2f} reviews/month LOWER** than competitors (increase visibility)")
-            
-            for insight in comp_insights:
-                st.info(insight)
-        except Exception as e:
-            st.caption(f"Competitive comparison unavailable: {e}")
-
-        # Review Quality Analytics
+        # Review Quality
         st.markdown('<div class="section-header">⭐ Review Quality Analytics</div>', unsafe_allow_html=True)
         try:
-            quality_metrics = calculate_review_quality(host_reviews, comp_df["reviews_per_month"].mean() if not comp_df.empty else 0.5, comp_df)
-            
+            quality_metrics = calculate_review_quality(host_reviews, comp_df_rt["reviews_per_month"].mean() if not comp_df_rt.empty else 0.5, comp_df_rt)
             col_qual1, col_qual2, col_qual3, col_qual4 = st.columns(4)
-            
-            with col_qual1:
-                vel_pct = quality_metrics["velocity_score"] * 100
-                vel_color = "#90EE90" if vel_pct >= 70 else "#FFD700" if vel_pct >= 40 else "#FF6B6B"
-                st.markdown(f"""
-                <div style="background:#132140; border:1px solid rgba(0,212,255,0.2); border-radius:8px; padding:0.8rem; text-align:center;">
-                    <p style="color:#8899AA; font-size:0.65rem; margin:0 0 0.3rem;">VELOCITY</p>
-                    <p style="color:{vel_color}; font-size:1.6rem; font-weight:700; margin:0;">{vel_pct:.0f}%</p>
-                    <p style="color:#8899AA; font-size:0.7rem; margin:0.3rem 0;">Reviews/month</p>
-                </div>
-                """, unsafe_allow_html=True)
-            
-            with col_qual2:
-                cons_pct = quality_metrics["consistency_score"] * 100
-                cons_color = "#90EE90" if cons_pct >= 85 else "#FFD700" if cons_pct >= 60 else "#FF6B6B"
-                st.markdown(f"""
-                <div style="background:#132140; border:1px solid rgba(0,212,255,0.2); border-radius:8px; padding:0.8rem; text-align:center;">
-                    <p style="color:#8899AA; font-size:0.65rem; margin:0 0 0.3rem;">CONSISTENCY</p>
-                    <p style="color:{cons_color}; font-size:1.6rem; font-weight:700; margin:0;">{cons_pct:.0f}%</p>
-                    <p style="color:#8899AA; font-size:0.7rem; margin:0.3rem 0;">Host activity</p>
-                </div>
-                """, unsafe_allow_html=True)
-            
-            with col_qual3:
-                rec_pct = quality_metrics["recency_score"] * 100
-                rec_color = "#90EE90" if rec_pct >= 70 else "#FFD700" if rec_pct >= 40 else "#FF6B6B"
-                st.markdown(f"""
-                <div style="background:#132140; border:1px solid rgba(0,212,255,0.2); border-radius:8px; padding:0.8rem; text-align:center;">
-                    <p style="color:#8899AA; font-size:0.65rem; margin:0 0 0.3rem;">RECENCY</p>
-                    <p style="color:{rec_color}; font-size:1.6rem; font-weight:700; margin:0;">{rec_pct:.0f}%</p>
-                    <p style="color:#8899AA; font-size:0.7rem; margin:0.3rem 0;">Recent activity</p>
-                </div>
-                """, unsafe_allow_html=True)
-            
-            with col_qual4:
-                qual_pct = quality_metrics["quality_score"] * 100
-                qual_color = "#00D4FF" if qual_pct >= 80 else "#FFD700" if qual_pct >= 60 else "#FF6B6B"
-                st.markdown(f"""
-                <div style="background:#132140; border:1px solid rgba(0,212,255,0.3); border-radius:8px; padding:0.8rem; text-align:center; border-width:2px;">
-                    <p style="color:#8899AA; font-size:0.65rem; margin:0 0 0.3rem;">OVERALL QUALITY</p>
-                    <p style="color:{qual_color}; font-size:1.8rem; font-weight:700; margin:0;">{qual_pct:.0f}%</p>
-                    <p style="color:{qual_color}; font-size:0.7rem; margin:0.3rem 0; font-weight:600;">{quality_metrics['status']}</p>
-                </div>
-                """, unsafe_allow_html=True)
-            
-            st.info(f"💡 **Review Quality Score**: Your listing shows {quality_metrics['status'].lower()} review engagement. Focus on maintaining consistent bookings to improve velocity and recency metrics.")
+            metrics = [
+                ("VELOCITY", f"{quality_metrics['velocity_score']*100:.0f}%", "#90EE90" if quality_metrics['velocity_score'] >= 0.7 else "#FFD700" if quality_metrics['velocity_score'] >= 0.4 else "#FF6B6B"),
+                ("CONSISTENCY", f"{quality_metrics['consistency_score']*100:.0f}%", "#90EE90" if quality_metrics['consistency_score'] >= 0.85 else "#FFD700" if quality_metrics['consistency_score'] >= 0.6 else "#FF6B6B"),
+                ("RECENCY", f"{quality_metrics['recency_score']*100:.0f}%", "#90EE90" if quality_metrics['recency_score'] >= 0.7 else "#FFD700" if quality_metrics['recency_score'] >= 0.4 else "#FF6B6B"),
+                ("OVERALL", f"{quality_metrics['quality_score']*100:.0f}%", "#00D4FF" if quality_metrics['quality_score'] >= 0.8 else "#FFD700" if quality_metrics['quality_score'] >= 0.6 else "#FF6B6B"),
+            ]
+            for col, (label, val, color) in zip([col_qual1, col_qual2, col_qual3, col_qual4], metrics):
+                with col:
+                    st.markdown(f"""<div style="background:#132140; border:1px solid rgba(0,212,255,0.2); border-radius:8px; padding:0.8rem; text-align:center;">
+                        <p style="color:#8899AA; font-size:0.65rem; margin:0 0 0.3rem;">{label}</p>
+                        <p style="color:{color}; font-size:1.6rem; font-weight:700; margin:0;">{val}</p></div>""", unsafe_allow_html=True)
         except Exception as e:
             st.caption(f"Quality analytics unavailable: {e}")
 
