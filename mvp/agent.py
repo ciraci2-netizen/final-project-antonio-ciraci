@@ -95,7 +95,8 @@ def analyze_listings(sample_df, neighbourhood_filter="All"):
 {neighbourhood_context}
 Top 10 ranked listings:
 {data_text}
-Generate 5 actionable insights for an independent host focusing on: pricing vs median, review demand signals, key differentiators, risks/opportunities, one concrete action this week. Be specific and data-driven."""
+Generate exactly 5 actionable insights for an independent host. Focus on: pricing vs median, review demand signals, key differentiators, risks/opportunities, one concrete action this week. Be specific and data-driven.
+IMPORTANT: Start directly with "1." — no preamble, no meta-commentary, no intro sentence."""
     try:
         llm = ChatOpenAI(model="gpt-4o-mini")
         response = llm.invoke([HumanMessage(content=prompt)])
@@ -732,7 +733,7 @@ def run_streamlit():
     st.markdown(f"""
     <div class="kpi-grid">
         <div class="kpi-card"><div class="kpi-label">{T['total']}</div><div class="kpi-value cyan">{_kpi_total}</div></div>
-        <div class="kpi-card"><div class="kpi-label">{T['median']}</div><div class="kpi-value">{_kpi_med}<span style="font-size:0.9rem;color:#8899AA">{_kpi_night}</span></div></div>
+        <div class="kpi-card"><div class="kpi-label">{T['median']}</div><div class="kpi-value">{_kpi_med}</div><div style="font-size:0.75rem;color:#8899AA;margin-top:0.2rem;">{_kpi_night}</div></div>
         <div class="kpi-card"><div class="kpi-label">{T['avg']}</div><div class="kpi-value">{_kpi_avg}</div></div>
         <div class="kpi-card"><div class="kpi-label">{T['top']}</div><div class="kpi-value gold">{_kpi_top}</div></div>
     </div>
@@ -983,7 +984,8 @@ def run_streamlit():
             personal_prompt = f"""You are a competitive intelligence analyst for the Berlin Airbnb market.
 Host listing: price €{host_price}, neighbourhood {host_neighbourhood}, room type {host_room_type_form}, reviews {host_reviews}, amenities: {host_amenities}.
 Score: {my_score} (beats {percentile}% of {host_neighbourhood} {host_room_type_form} competitors). Neighbourhood median: €{nb_median:.0f}. Competing listings: {nb_listings}.
-Generate 5 specific recommendations: 1) Price positioning vs €{nb_median:.0f} median 2) Review count vs top performers 3) Strongest amenity differentiator 4) One action this week 5) Optimised listing opening sentence. Be direct and use the numbers."""
+Generate exactly 5 specific recommendations: 1) Price positioning vs €{nb_median:.0f} median 2) Review count vs top performers 3) Strongest amenity differentiator 4) One action this week 5) Optimised listing opening sentence. Be direct and use the numbers.
+IMPORTANT: Start directly with "*1)" — no preamble, no intro sentence, no meta-commentary."""
 
             llm = ChatOpenAI(model="gpt-4o-mini")
             response = llm.invoke([HumanMessage(content=personal_prompt)])
