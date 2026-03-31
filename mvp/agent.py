@@ -57,7 +57,9 @@ def compute_ranking(df, neighbourhood_filter=None):
     working["review_score"] = (quality_score * 0.6 + quantity_score * 0.4)
 
     neighbourhood_counts = working["neighbourhood_group"].map(working["neighbourhood_group"].value_counts())
-    working["demand_score"] = neighbourhood_counts / neighbourhood_counts.max()
+    import numpy as np
+    log_counts = np.log1p(neighbourhood_counts)
+    working["demand_score"] = log_counts / log_counts.max()
     working["ranking_score"] = (working["price_score"] * 0.4 + working["review_score"] * 0.4 + working["demand_score"] * 0.2).round(3)
     return working.sort_values("ranking_score", ascending=False)
 
@@ -626,7 +628,7 @@ def run_streamlit():
         .kpi-card { background:var(--bg-card); border:1px solid var(--border); border-radius:12px; padding:1.2rem 1.5rem; position:relative; overflow:hidden; }
         .kpi-card::before { content:''; position:absolute; top:0; left:0; right:0; height:2px; background:linear-gradient(90deg,var(--cyan),transparent); }
         .kpi-label { font-size:0.72rem; color:var(--muted); text-transform:uppercase; letter-spacing:0.1em; font-family:'Space Mono',monospace; margin-bottom:0.4rem; }
-        .kpi-value { font-size:1.6rem; font-weight:600; color:var(--white); line-height:1; }
+        .kpi-value { font-size:1.3rem; font-weight:600; color:var(--white); line-height:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
         .kpi-value.cyan { color:var(--cyan); }
         .kpi-value.gold { color:var(--gold); }
         .section-header { font-family:'Space Mono',monospace; font-size:0.8rem; font-weight:700; color:var(--cyan); letter-spacing:0.12em; text-transform:uppercase; margin:2rem 0 1rem; display:flex; align-items:center; gap:10px; }
@@ -921,20 +923,24 @@ def run_streamlit():
         with fc1:
             host_price = st.number_input(T["price_label"], min_value=10, max_value=1000, value=85)
         with fc2:
-            host_neighbourhood = st.selectbox(T["nb_label"], ["All"] + sorted(df["neighbourhood_group"].dropna().unique().tolist()), key="host_nb")
+            host_neighbourhood = st.selectbox(T["nb_label"], sorted(df["neighbourhood_group"].dropna().unique().tolist()), key="host_nb")
         with fc3:
             host_reviews = st.number_input(T["reviews_label"], min_value=0, max_value=5000, value=25)
-        host_amenities = st.text_input(T["amenities_label"], value="balcony, wifi, fully equipped kitchen")
+        fc4, fc5 = st.columns(2)
+        with fc4:
+            host_room_type_form = st.selectbox("Your room type", sorted(df["room_type"].dropna().unique().tolist()), index=sorted(df["room_type"].dropna().unique().tolist()).index("Entire home/apt") if "Entire home/apt" in df["room_type"].dropna().unique().tolist() else 0, key="host_rt")
+        with fc5:
+            host_amenities = st.text_input(T["amenities_label"], value="balcony, wifi, fully equipped kitchen")
         submitted = st.form_submit_button(T["submit"], type="primary")
 
     if submitted:
         with st.spinner(T["spinner_listing"]):
-            comp_df = compute_ranking(df, host_neighbourhood if host_neighbourhood != "All" else None)
+            comp_df = compute_ranking(df, host_neighbourhood)
 
-            # FIX 6: filter comp_df by room type for fair price comparison
+            # Use room type from form for fair comparison
             comp_df_rt = comp_df.copy()
-            if selected_room_type != "All" and "room_type" in comp_df_rt.columns:
-                rt_filtered = comp_df_rt[comp_df_rt["room_type"] == selected_room_type]
+            if "room_type" in comp_df_rt.columns:
+                rt_filtered = comp_df_rt[comp_df_rt["room_type"] == host_room_type_form]
                 if not rt_filtered.empty:
                     comp_df_rt = rt_filtered
 
@@ -954,18 +960,16 @@ def run_streamlit():
                 'availability_365': 200,
                 'number_of_reviews_ltm': int(host_reviews * 0.4),
                 'last_review': pd.Timestamp.now() - pd.Timedelta(days=15),
-                'room_type': selected_room_type,
+                'room_type': host_room_type_form,
                 'neighbourhood': host_neighbourhood,
                 'name': 'Your Listing'
             })
 
-            # FIX 6: pass selected_room_type to recommend_optimal_price
             recommended_mid, recommended_low, recommended_high = recommend_optimal_price(
-                host_price, comp_df_rt, host_room_type=selected_room_type
+                host_price, comp_df_rt, host_room_type=host_room_type_form
             )
 
-            # FIX 3: pass room type to get_top_competitors
-            competitors = get_top_competitors(host_price, host_neighbourhood, selected_room_type, df, comp_df_rt)
+            competitors = get_top_competitors(host_price, host_neighbourhood, host_room_type_form, df, comp_df_rt)
 
             st.session_state.revenue_impact = calculate_revenue_impact(
                 host_price,
@@ -977,8 +981,8 @@ def run_streamlit():
             st.session_state.revenue_impact_ready = True
 
             personal_prompt = f"""You are a competitive intelligence analyst for the Berlin Airbnb market.
-Host listing: price €{host_price}, neighbourhood {host_neighbourhood}, reviews {host_reviews}, amenities: {host_amenities}.
-Score: {my_score} (beats {percentile}% of {host_neighbourhood} competitors). Neighbourhood median: €{nb_median:.0f}. Competing listings: {nb_listings}.
+Host listing: price €{host_price}, neighbourhood {host_neighbourhood}, room type {host_room_type_form}, reviews {host_reviews}, amenities: {host_amenities}.
+Score: {my_score} (beats {percentile}% of {host_neighbourhood} {host_room_type_form} competitors). Neighbourhood median: €{nb_median:.0f}. Competing listings: {nb_listings}.
 Generate 5 specific recommendations: 1) Price positioning vs €{nb_median:.0f} median 2) Review count vs top performers 3) Strongest amenity differentiator 4) One action this week 5) Optimised listing opening sentence. Be direct and use the numbers."""
 
             llm = ChatOpenAI(model="gpt-4o-mini")
