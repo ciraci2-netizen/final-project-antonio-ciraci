@@ -260,15 +260,26 @@ def create_growth_roadmap(host_reviews, host_price, host_neighbourhood, comp_df)
     }
 
 
-def calculate_review_quality(host_reviews, reviews_per_month, comp_df):
+def calculate_review_quality(host_reviews, host_reviews_per_month, comp_df):
     avg_monthly = comp_df["reviews_per_month"].mean()
     max_reviews = comp_df["number_of_reviews"].max()
-    velocity_score = min(1.0, (reviews_per_month / max(avg_monthly, 0.1)))
-    if reviews_per_month > 0:
-        consistency_score = 0.9 if reviews_per_month > 0.5 else 0.7 if reviews_per_month > 0.2 else 0.5
+
+    # Velocity: how does host's booking rate compare to market average?
+    velocity_score = min(1.0, (host_reviews_per_month / max(avg_monthly, 0.1)))
+
+    # Consistency: based on host's actual reviews/month
+    if host_reviews_per_month >= avg_monthly:
+        consistency_score = 0.9
+    elif host_reviews_per_month >= avg_monthly * 0.5:
+        consistency_score = 0.7
+    elif host_reviews_per_month > 0:
+        consistency_score = 0.5
     else:
         consistency_score = 0.3
-    recency_score = min(1.0, (reviews_per_month / max(avg_monthly, 0.1)))
+
+    # Recency: proxy — higher reviews/month = more recent activity
+    recency_score = min(1.0, (host_reviews_per_month / max(avg_monthly, 0.1)))
+
     quality_score = (velocity_score * 0.5 + consistency_score * 0.35 + recency_score * 0.15)
     return {
         "velocity_score": velocity_score, "consistency_score": consistency_score,
@@ -1208,7 +1219,9 @@ IMPORTANT: Start directly with "*1)" — no preamble, no intro sentence, no meta
         # Review Quality
         st.markdown('<div class="section-header">⭐ Review Quality Analytics</div>', unsafe_allow_html=True)
         try:
-            quality_metrics = calculate_review_quality(host_reviews, comp_df_rt["reviews_per_month"].mean() if not comp_df_rt.empty else 0.5, comp_df_rt)
+            # Estimate host reviews_per_month from actual reviews (assume ~24 months active)
+            host_rpm_estimate = host_reviews / 24.0
+            quality_metrics = calculate_review_quality(host_reviews, host_rpm_estimate, comp_df_rt)
             col_qual1, col_qual2, col_qual3, col_qual4 = st.columns(4)
             metrics = [
                 ("VELOCITY", f"{quality_metrics['velocity_score']*100:.0f}%", "#90EE90" if quality_metrics['velocity_score'] >= 0.7 else "#FFD700" if quality_metrics['velocity_score'] >= 0.4 else "#FF6B6B"),
