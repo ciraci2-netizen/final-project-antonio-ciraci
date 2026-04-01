@@ -1,9 +1,9 @@
-langchain-openai>=0.1.0,<1.0.0
-langchain-core>=0.1.0,<1.0.0
-langsmith>=0.1.0,<1.0.0
-openai>=1.0.0,<2.0.0
+langchain-openai>=0.1.0
+langchain-core>=0.1.0
+langsmith>=0.1.0
+openai>=1.0.0
 pandas>=2.0.0,<2.3.0
 python-dotenv>=1.0.0
-streamlit>=1.32.0,<2.0.0
-pydeck>=0.8.0,<1.0.0
-plotly>=5.0.0,<6.0.0
+streamlit>=1.32.0
+pydeck>=0.8.0
+plotly>=5.0.0
