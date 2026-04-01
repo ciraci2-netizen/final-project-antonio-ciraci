@@ -779,7 +779,7 @@ def run_streamlit():
         style = 'background-color:rgba(0,212,255,0.08);border-left:3px solid #00D4FF' if row.name == 1 else ''
         return [style] * len(row)
 
-    _styled = _tbl.style.applymap(_color_score, subset=['Score']).apply(_hl_top, axis=1)
+    _styled = _tbl.style.map(_color_score, subset=['Score']).apply(_hl_top, axis=1)
     st.dataframe(_styled, use_container_width=True, height=400)
     st.caption(T["caption"])
 
