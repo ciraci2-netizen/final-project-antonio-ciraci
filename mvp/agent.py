@@ -725,6 +725,19 @@ def run_streamlit():
         </div>
         """, unsafe_allow_html=True)
 
+    # Show installed versions in sidebar (for debugging - remove after presentation)
+    import importlib.metadata as _meta
+    with st.sidebar:
+        st.markdown("---")
+        _pkgs = ["pandas","streamlit","langchain-openai","langchain-core","openai","langsmith","plotly","pydeck"]
+        _ver_lines = []
+        for _p in _pkgs:
+            try: _ver_lines.append(f"{_p}=={_meta.version(_p)}")
+            except: _ver_lines.append(f"{_p}=?")
+        st.caption("📦 " + " | ".join(_ver_lines[:4]))
+        st.caption("📦 " + " | ".join(_ver_lines[4:]))
+
+
     df_filtered = df.copy()
     if selected_room_type != "All":
         df_filtered = df_filtered[df_filtered["room_type"] == selected_room_type]
